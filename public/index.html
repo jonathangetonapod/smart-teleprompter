@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Teleprompter</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Setup Panel -->
+    <div id="setup-panel" class="panel">
+      <h1>🎬 Smart Teleprompter</h1>
+      <p class="subtitle">Voice-controlled scrolling that follows along as you speak</p>
+      
+      <div class="controls">
+        <label for="script-input">Paste your script:</label>
+        <textarea id="script-input" placeholder="Enter your script here..."></textarea>
+        
+        <div class="settings">
+          <div class="setting">
+            <label for="font-size">Font Size</label>
+            <input type="range" id="font-size" min="24" max="120" value="48">
+            <span id="font-size-value">48px</span>
+          </div>
+          
+          <div class="setting">
+            <label for="scroll-speed">Scroll Smoothness</label>
+            <input type="range" id="scroll-speed" min="100" max="1000" value="300">
+          </div>
+          
+          <div class="setting">
+            <label>
+              <input type="checkbox" id="mirror-mode">
+              Mirror Mode (for teleprompter glass)
+            </label>
+          </div>
+          
+          <div class="setting">
+            <label>
+              <input type="checkbox" id="dark-mode" checked>
+              Dark Mode
+            </label>
+          </div>
+        </div>
+        
+        <button id="start-btn" class="primary-btn">🎤 Start Teleprompter</button>
+      </div>
+    </div>
+    
+    <!-- Teleprompter View -->
+    <div id="teleprompter" class="hidden">
+      <div id="script-container">
+        <div id="script-text"></div>
+      </div>
+      
+      <div id="status-bar">
+        <div id="mic-status">🎤 Listening...</div>
+        <div id="transcript"></div>
+      </div>
+      
+      <div id="teleprompter-controls">
+        <button id="pause-btn">⏸️ Pause</button>
+        <button id="reset-btn">🔄 Reset</button>
+        <button id="exit-btn">✖️ Exit</button>
+      </div>
+    </div>
+  </div>
+  
+  <script src="app.js"></script>
+</body>
+</html>

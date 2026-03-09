@@ -1,0 +1,254 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #1a1a2e;
+  color: #eee;
+  min-height: 100vh;
+}
+
+body.light-mode {
+  background: #f5f5f5;
+  color: #222;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Setup Panel */
+#setup-panel {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 40px 20px;
+}
+
+h1 {
+  font-size: 2.5rem;
+  margin-bottom: 10px;
+  text-align: center;
+}
+
+.subtitle {
+  text-align: center;
+  opacity: 0.7;
+  margin-bottom: 40px;
+}
+
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+label {
+  font-weight: 600;
+  margin-bottom: 5px;
+  display: block;
+}
+
+textarea {
+  width: 100%;
+  height: 200px;
+  padding: 15px;
+  border-radius: 10px;
+  border: 2px solid #333;
+  background: #16213e;
+  color: #eee;
+  font-size: 16px;
+  resize: vertical;
+}
+
+body.light-mode textarea {
+  background: #fff;
+  color: #222;
+  border-color: #ddd;
+}
+
+.settings {
+  display: grid;
+  gap: 15px;
+}
+
+.setting {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.setting label {
+  min-width: 150px;
+  margin: 0;
+}
+
+input[type="range"] {
+  flex: 1;
+  max-width: 200px;
+}
+
+.primary-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 15px 30px;
+  font-size: 1.2rem;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  margin-top: 20px;
+}
+
+.primary-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+}
+
+/* Teleprompter View */
+#teleprompter {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#script-container {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+#script-text {
+  padding: 20vh 10vw;
+  line-height: 1.6;
+  transition: transform 0.3s ease-out;
+}
+
+#script-text.mirrored {
+  transform: scaleX(-1);
+}
+
+#script-text .word {
+  display: inline;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: background 0.2s, color 0.2s;
+}
+
+#script-text .word.spoken {
+  opacity: 0.4;
+}
+
+#script-text .word.current {
+  background: #667eea;
+  color: white;
+  opacity: 1;
+}
+
+#script-text .word.upcoming {
+  opacity: 1;
+}
+
+/* Focus line in center */
+#script-container::before {
+  content: '';
+  position: absolute;
+  top: 30%;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, #667eea, transparent);
+  pointer-events: none;
+  z-index: 10;
+}
+
+#status-bar {
+  background: rgba(0, 0, 0, 0.8);
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  font-size: 14px;
+}
+
+#mic-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#mic-status.listening {
+  color: #4ade80;
+}
+
+#mic-status.paused {
+  color: #f59e0b;
+}
+
+#transcript {
+  flex: 1;
+  opacity: 0.6;
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#teleprompter-controls {
+  background: rgba(0, 0, 0, 0.9);
+  padding: 15px;
+  display: flex;
+  justify-content: center;
+  gap: 15px;
+}
+
+#teleprompter-controls button {
+  background: #333;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+#teleprompter-controls button:hover {
+  background: #444;
+}
+
+#pause-btn.paused {
+  background: #4ade80;
+  color: #000;
+}
+
+/* Light mode adjustments */
+body.light-mode #status-bar,
+body.light-mode #teleprompter-controls {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+body.light-mode #teleprompter-controls button {
+  background: #ddd;
+  color: #222;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  #script-text {
+    padding: 20vh 5vw;
+  }
+  
+  .setting {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  input[type="range"] {
+    width: 100%;
+    max-width: none;
+  }
+}
