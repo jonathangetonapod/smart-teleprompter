@@ -106,8 +106,7 @@ body.light-mode select {
   border-color: #ddd;
 }
 
-.primary-btn {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+.primary-btn, .secondary-btn {
   color: white;
   border: none;
   padding: 15px 30px;
@@ -115,12 +114,26 @@ body.light-mode select {
   border-radius: 10px;
   cursor: pointer;
   transition: transform 0.2s, box-shadow 0.2s;
-  margin-top: 20px;
+  margin-top: 10px;
 }
 
-.primary-btn:hover {
+.primary-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.secondary-btn {
+  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+}
+
+.primary-btn:hover, .secondary-btn:hover {
   transform: translateY(-2px);
   box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+}
+
+.secondary-btn:disabled {
+  background: #555;
+  cursor: not-allowed;
+  transform: none;
 }
 
 /* Teleprompter View */

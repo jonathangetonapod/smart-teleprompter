@@ -26,6 +26,7 @@ class SmartTeleprompter {
   setupEventListeners() {
     // Setup panel
     document.getElementById('start-btn').addEventListener('click', () => this.start());
+    document.getElementById('convert-btn').addEventListener('click', () => this.convertToScript());
     document.getElementById('font-size').addEventListener('input', (e) => this.updateFontSize(e.target.value));
     document.getElementById('scroll-speed').addEventListener('input', (e) => {
       this.scrollSpeed = parseInt(e.target.value);
@@ -559,6 +560,47 @@ class SmartTeleprompter {
       document.body.classList.remove('light-mode');
     } else {
       document.body.classList.add('light-mode');
+    }
+  }
+  
+  async convertToScript() {
+    const textarea = document.getElementById('script-input');
+    const text = textarea.value.trim();
+    
+    if (!text) {
+      alert('Please paste some content first!');
+      return;
+    }
+    
+    const btn = document.getElementById('convert-btn');
+    const originalText = btn.textContent;
+    btn.textContent = '⏳ Converting...';
+    btn.disabled = true;
+    
+    try {
+      const response = await fetch('/api/convert-script', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      
+      const data = await response.json();
+      
+      if (data.script) {
+        textarea.value = data.script;
+        btn.textContent = '✅ Converted!';
+        setTimeout(() => {
+          btn.textContent = originalText;
+          btn.disabled = false;
+        }, 2000);
+      } else {
+        throw new Error(data.error || 'Failed to convert');
+      }
+    } catch (error) {
+      console.error('Error converting script:', error);
+      alert('Failed to convert script: ' + error.message);
+      btn.textContent = originalText;
+      btn.disabled = false;
     }
   }
 }
