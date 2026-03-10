@@ -7,13 +7,25 @@ const PORT = process.env.PORT || 3000;
 // API keys
 const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY || 'aae323f183d9722757af4b74b651d3c6e37b23e4';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || '';
 
 app.use(express.static('public'));
 app.use(express.json());
 
-// Endpoint to get Deepgram key for client
+// Endpoint to get API keys for client
 app.get('/api/deepgram-key', (req, res) => {
   res.json({ apiKey: DEEPGRAM_API_KEY });
+});
+
+app.get('/api/elevenlabs-key', (req, res) => {
+  res.json({ apiKey: ELEVENLABS_API_KEY });
+});
+
+app.get('/api/keys', (req, res) => {
+  res.json({ 
+    deepgram: DEEPGRAM_API_KEY,
+    elevenlabs: ELEVENLABS_API_KEY 
+  });
 });
 
 // Endpoint to convert text to teleprompter script using Claude

@@ -1,4 +1,4 @@
-// Smart Teleprompter - Voice-controlled scrolling with Deepgram
+// Smart Teleprompter - Voice-controlled scrolling with Deepgram or ElevenLabs
 class SmartTeleprompter {
   constructor() {
     this.words = [];
@@ -11,10 +11,11 @@ class SmartTeleprompter {
     this.isScrolling = false;
     this.scrollInterval = null;
     this.currentScrollY = 0;
-    this.deepgramSocket = null;
+    this.sttSocket = null;  // Generic socket for either provider
     this.audioStream = null;
     this.lastSpeechTime = 0;
     this.silenceTimeout = null;
+    this.sttProvider = 'deepgram';  // 'deepgram' or 'elevenlabs'
     
     this.init();
   }
@@ -76,6 +77,17 @@ class SmartTeleprompter {
     });
   }
   
+  async setupSTT() {
+    this.sttProvider = document.getElementById('stt-provider')?.value || 'deepgram';
+    console.log('Setting up STT provider:', this.sttProvider);
+    
+    if (this.sttProvider === 'elevenlabs') {
+      await this.setupElevenLabs();
+    } else {
+      await this.setupDeepgram();
+    }
+  }
+  
   async setupDeepgram() {
     try {
       // Get API key from server
@@ -89,18 +101,18 @@ class SmartTeleprompter {
       const language = document.getElementById('language')?.value || 'en';
       
       // Connect to Deepgram WebSocket (Nova-3 with smart_format)
-      this.deepgramSocket = new WebSocket(
+      this.sttSocket = new WebSocket(
         `wss://api.deepgram.com/v1/listen?model=nova-3&language=${language}&smart_format=true&interim_results=true&endpointing=300&encoding=linear16&sample_rate=16000`,
         ['token', apiKey]
       );
       
-      this.deepgramSocket.onopen = () => {
+      this.sttSocket.onopen = () => {
         console.log('Deepgram connected');
-        document.getElementById('mic-status').textContent = '🎤 Deepgram Connected';
+        document.getElementById('mic-status').textContent = '🎤 Deepgram Nova-3 Connected';
         this.startRecording();
       };
       
-      this.deepgramSocket.onmessage = (event) => {
+      this.sttSocket.onmessage = (event) => {
         if (this.isPaused) return;
         
         const data = JSON.parse(event.data);
@@ -125,13 +137,13 @@ class SmartTeleprompter {
         }
       };
       
-      this.deepgramSocket.onerror = (error) => {
+      this.sttSocket.onerror = (error) => {
         console.error('Deepgram error:', error);
         document.getElementById('mic-status').textContent = '⚠️ Deepgram Error - Using Fallback';
         this.fallbackToWebSpeech();
       };
       
-      this.deepgramSocket.onclose = (event) => {
+      this.sttSocket.onclose = (event) => {
         console.log('Deepgram disconnected', event.code, event.reason);
         // Don't auto-reconnect if we closed intentionally or auth failed
         if (this.isListening && !this.isPaused && event.code !== 1000) {
@@ -146,7 +158,95 @@ class SmartTeleprompter {
     }
   }
   
-  startRecording() {
+  async setupElevenLabs() {
+    try {
+      // Get API key from server
+      const response = await fetch('/api/elevenlabs-key');
+      const { apiKey } = await response.json();
+      
+      if (!apiKey) {
+        console.error('No ElevenLabs API key configured');
+        document.getElementById('mic-status').textContent = '⚠️ No ElevenLabs API Key';
+        this.fallbackToWebSpeech();
+        return;
+      }
+      
+      // Get microphone access
+      this.audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      // Get selected language
+      const language = document.getElementById('language')?.value || 'en';
+      
+      // Connect to ElevenLabs Scribe WebSocket
+      this.sttSocket = new WebSocket('wss://api.elevenlabs.io/v1/speech-to-text/stream');
+      
+      this.sttSocket.onopen = () => {
+        console.log('ElevenLabs WebSocket opened, sending config...');
+        // Send initial config
+        this.sttSocket.send(JSON.stringify({
+          type: 'config',
+          data: {
+            model: 'scribe_v2',
+            language: language === 'multi' ? 'auto' : language,
+            sample_rate: 16000,
+            encoding: 'pcm_s16le'
+          },
+          authorization: `Bearer ${apiKey}`
+        }));
+        document.getElementById('mic-status').textContent = '🎤 ElevenLabs Scribe Connected';
+        this.startRecordingElevenLabs();
+      };
+      
+      this.sttSocket.onmessage = (event) => {
+        if (this.isPaused) return;
+        
+        const data = JSON.parse(event.data);
+        console.log('ElevenLabs message:', data);
+        
+        // Handle transcription based on ElevenLabs response format
+        if (data.text || data.transcript) {
+          const transcript = data.text || data.transcript;
+          if (transcript.trim()) {
+            console.log('Heard:', transcript);
+            document.getElementById('transcript').textContent = transcript;
+            this.onSpeechDetected();
+            this.matchAndScroll(transcript);
+          }
+        }
+        
+        // Handle partial/interim results
+        if (data.type === 'transcript' && data.data?.text) {
+          const transcript = data.data.text;
+          if (transcript.trim()) {
+            console.log('Heard:', transcript);
+            document.getElementById('transcript').textContent = transcript;
+            this.onSpeechDetected();
+            this.matchAndScroll(transcript);
+          }
+        }
+      };
+      
+      this.sttSocket.onerror = (error) => {
+        console.error('ElevenLabs error:', error);
+        document.getElementById('mic-status').textContent = '⚠️ ElevenLabs Error - Using Fallback';
+        this.fallbackToWebSpeech();
+      };
+      
+      this.sttSocket.onclose = (event) => {
+        console.log('ElevenLabs disconnected', event.code, event.reason);
+        if (this.isListening && !this.isPaused && event.code !== 1000) {
+          console.log('Reconnecting in 2 seconds...');
+          setTimeout(() => this.setupElevenLabs(), 2000);
+        }
+      };
+      
+    } catch (error) {
+      console.error('Failed to setup ElevenLabs:', error);
+      this.fallbackToWebSpeech();
+    }
+  }
+  
+  startRecordingElevenLabs() {
     try {
       const audioContext = new AudioContext({ sampleRate: 16000 });
       const source = audioContext.createMediaStreamSource(this.audioStream);
@@ -155,13 +255,17 @@ class SmartTeleprompter {
       let audioSent = 0;
       
       processor.onaudioprocess = (e) => {
-        if (this.deepgramSocket?.readyState === WebSocket.OPEN && !this.isPaused) {
+        if (this.sttSocket?.readyState === WebSocket.OPEN && !this.isPaused) {
           const inputData = e.inputBuffer.getChannelData(0);
           const pcmData = new Int16Array(inputData.length);
           for (let i = 0; i < inputData.length; i++) {
             pcmData[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
           }
-          this.deepgramSocket.send(pcmData.buffer);
+          // ElevenLabs expects audio data wrapped in a message
+          this.sttSocket.send(JSON.stringify({
+            type: 'audio',
+            data: btoa(String.fromCharCode.apply(null, new Uint8Array(pcmData.buffer)))
+          }));
           audioSent++;
           if (audioSent % 50 === 0) {
             console.log(`Audio chunks sent: ${audioSent}`);
@@ -173,7 +277,40 @@ class SmartTeleprompter {
       processor.connect(audioContext.destination);
       this.audioContext = audioContext;
       this.processor = processor;
-      console.log('Audio recording started');
+      console.log('ElevenLabs audio recording started');
+    } catch (error) {
+      console.error('Error starting ElevenLabs recording:', error);
+    }
+  }
+  
+  startRecording() {
+    try {
+      const audioContext = new AudioContext({ sampleRate: 16000 });
+      const source = audioContext.createMediaStreamSource(this.audioStream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      
+      let audioSent = 0;
+      
+      processor.onaudioprocess = (e) => {
+        if (this.sttSocket?.readyState === WebSocket.OPEN && !this.isPaused) {
+          const inputData = e.inputBuffer.getChannelData(0);
+          const pcmData = new Int16Array(inputData.length);
+          for (let i = 0; i < inputData.length; i++) {
+            pcmData[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+          }
+          this.sttSocket.send(pcmData.buffer);
+          audioSent++;
+          if (audioSent % 50 === 0) {
+            console.log(`Audio chunks sent: ${audioSent}`);
+          }
+        }
+      };
+      
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+      this.audioContext = audioContext;
+      this.processor = processor;
+      console.log('Deepgram audio recording started');
     } catch (error) {
       console.error('Error starting recording:', error);
     }
@@ -310,7 +447,7 @@ class SmartTeleprompter {
     this.isListening = true;
     document.getElementById('mic-status').textContent = '🎤 Connecting...';
     
-    await this.setupDeepgram();
+    await this.setupSTT();
   }
   
   parseScript(text) {
@@ -480,9 +617,9 @@ class SmartTeleprompter {
       clearTimeout(this.silenceTimeout);
     }
     
-    if (this.deepgramSocket) {
-      this.deepgramSocket.close();
-      this.deepgramSocket = null;
+    if (this.sttSocket) {
+      this.sttSocket.close();
+      this.sttSocket = null;
     }
     if (this.audioStream) {
       this.audioStream.getTracks().forEach(track => track.stop());
