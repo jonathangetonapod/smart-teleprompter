@@ -321,8 +321,15 @@ class SmartTeleprompter {
       const wordOffset = wordRect.top - containerRect.top;
       const newY = currentY - (wordOffset - targetY);
       
+      // Get current mirror mode and preserve it
+      const mirrorMode = document.getElementById('mirror-mode-live')?.value || 'none';
+      let mirrorTransform = '';
+      if (mirrorMode === 'horizontal') mirrorTransform = 'scaleX(-1)';
+      else if (mirrorMode === 'vertical') mirrorTransform = 'scaleY(-1)';
+      else if (mirrorMode === 'both') mirrorTransform = 'scale(-1, -1)';
+      
       scrollText.style.transition = `transform ${this.scrollSpeed}ms ease-out`;
-      scrollText.style.transform = `translateY(${newY}px)`;
+      scrollText.style.transform = `translateY(${newY}px) ${mirrorTransform}`.trim();
     }
   }
   
@@ -393,14 +400,16 @@ class SmartTeleprompter {
   
   setMirrorMode(mode) {
     const scriptText = document.getElementById('script-text');
-    scriptText.classList.remove('mirrored-horizontal', 'mirrored-vertical', 'mirrored-both');
-    if (mode === 'horizontal') {
-      scriptText.classList.add('mirrored-horizontal');
-    } else if (mode === 'vertical') {
-      scriptText.classList.add('mirrored-vertical');
-    } else if (mode === 'both') {
-      scriptText.classList.add('mirrored-both');
-    }
+    // Get current translateY value
+    const currentTransform = new DOMMatrix(getComputedStyle(scriptText).transform);
+    const currentY = currentTransform.m42 || 0;
+    
+    let mirrorTransform = '';
+    if (mode === 'horizontal') mirrorTransform = 'scaleX(-1)';
+    else if (mode === 'vertical') mirrorTransform = 'scaleY(-1)';
+    else if (mode === 'both') mirrorTransform = 'scale(-1, -1)';
+    
+    scriptText.style.transform = `translateY(${currentY}px) ${mirrorTransform}`.trim();
   }
   
   toggleDarkMode(enabled) {
