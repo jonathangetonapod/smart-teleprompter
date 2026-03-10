@@ -88,9 +88,9 @@ class SmartTeleprompter {
       // Get selected language
       const language = document.getElementById('language')?.value || 'en';
       
-      // Connect to Deepgram WebSocket
+      // Connect to Deepgram WebSocket (Nova-3 with smart_format)
       this.deepgramSocket = new WebSocket(
-        `wss://api.deepgram.com/v1/listen?model=nova-2&language=${language}&punctuate=true&interim_results=true&vad_events=true&encoding=linear16&sample_rate=16000`,
+        `wss://api.deepgram.com/v1/listen?model=nova-3&language=${language}&smart_format=true&interim_results=true&endpointing=300&encoding=linear16&sample_rate=16000`,
         ['token', apiKey]
       );
       
