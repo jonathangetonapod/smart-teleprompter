@@ -31,6 +31,14 @@ class SmartTeleprompter {
     document.getElementById('reset-btn').addEventListener('click', () => this.reset());
     document.getElementById('exit-btn').addEventListener('click', () => this.exit());
     document.getElementById('mirror-mode-live').addEventListener('change', (e) => this.setMirrorMode(e.target.value));
+    document.getElementById('scroll-up-btn').addEventListener('click', () => this.manualScroll(-100));
+    document.getElementById('scroll-down-btn').addEventListener('click', () => this.manualScroll(100));
+    
+    // Mouse wheel scroll
+    document.getElementById('script-container')?.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      this.manualScroll(e.deltaY > 0 ? 50 : -50);
+    });
     
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
@@ -336,6 +344,23 @@ class SmartTeleprompter {
   jumpWords(count) {
     const newIndex = Math.max(0, Math.min(this.words.length - 1, this.currentWordIndex + count));
     this.scrollToWord(newIndex);
+  }
+  
+  manualScroll(delta) {
+    const scriptText = document.getElementById('script-text');
+    const currentTransform = new DOMMatrix(getComputedStyle(scriptText).transform);
+    const currentY = currentTransform.m42 || 0;
+    const newY = currentY - delta;
+    
+    // Get current mirror mode and preserve it
+    const mirrorMode = document.getElementById('mirror-mode-live')?.value || 'none';
+    let mirrorTransform = '';
+    if (mirrorMode === 'horizontal') mirrorTransform = 'scaleX(-1)';
+    else if (mirrorMode === 'vertical') mirrorTransform = 'scaleY(-1)';
+    else if (mirrorMode === 'both') mirrorTransform = 'scale(-1, -1)';
+    
+    scriptText.style.transition = 'transform 100ms ease-out';
+    scriptText.style.transform = `translateY(${newY}px) ${mirrorTransform}`.trim();
   }
   
   togglePause() {
