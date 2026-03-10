@@ -225,7 +225,7 @@ class SmartTeleprompter {
     }
   }
   
-  applyScroll() {
+  applyScroll(smooth = false) {
     const scriptText = document.getElementById('script-text');
     const mirrorMode = document.getElementById('mirror-mode-live')?.value || 'none';
     let mirrorTransform = '';
@@ -233,7 +233,7 @@ class SmartTeleprompter {
     else if (mirrorMode === 'vertical') mirrorTransform = 'scaleY(-1)';
     else if (mirrorMode === 'both') mirrorTransform = 'scale(-1, -1)';
     
-    scriptText.style.transition = 'none';
+    scriptText.style.transition = smooth ? 'transform 100ms linear' : 'none';
     scriptText.style.transform = `translateY(${this.currentScrollY}px) ${mirrorTransform}`.trim();
   }
   
@@ -343,70 +343,36 @@ class SmartTeleprompter {
   }
   
   matchAndScroll(transcript) {
-    const spokenWords = transcript.toLowerCase().split(/\s+/).map(w => this.normalizeWord(w)).filter(w => w.length > 0);
+    const spokenWords = transcript.toLowerCase().split(/\s+/).map(w => this.normalizeWord(w)).filter(w => w.length > 1);
     
     if (spokenWords.length === 0) return;
     
-    // Debug: show what we're searching in
-    if (this.words.length > 0 && !this.debugShown) {
-      console.log('Script words:', this.words.slice(0, 20).map(w => w.normalized).join(', '));
-      this.debugShown = true;
-    }
-    console.log('Spoken words:', spokenWords.join(', '));
+    // Search ahead from current position
+    const searchStart = this.currentWordIndex;
+    const searchEnd = Math.min(this.words.length, this.currentWordIndex + 30);
     
-    // Search a wider window
-    const searchStart = Math.max(0, this.currentWordIndex - 5);
-    const searchEnd = Math.min(this.words.length, this.currentWordIndex + 50);
+    // Get last spoken word for quick matching
+    const lastWord = spokenWords[spokenWords.length - 1];
     
-    let bestMatch = -1;
-    let bestScore = 0;
-    
-    // Try matching the last few spoken words
-    const recentSpoken = spokenWords.slice(-5);
-    
+    // Quick exact match first (fastest)
     for (let i = searchStart; i < searchEnd; i++) {
-      let score = 0;
-      let consecutiveMatches = 0;
-      
-      for (let j = 0; j < recentSpoken.length && i + j < this.words.length; j++) {
-        const spoken = recentSpoken[j];
-        const script = this.words[i + j].normalized;
-        
-        if (this.fuzzyMatch(spoken, script)) {
-          score += 2;
-          consecutiveMatches++;
-          // Bonus for consecutive matches
-          if (consecutiveMatches > 1) score += consecutiveMatches;
-        } else {
-          consecutiveMatches = 0;
-        }
-      }
-      
-      if (score > bestScore) {
-        bestScore = score;
-        bestMatch = i + Math.min(recentSpoken.length - 1, consecutiveMatches);
+      if (this.words[i].normalized === lastWord) {
+        console.log(`Exact match: "${lastWord}" at index ${i}`);
+        this.scrollToWord(i);
+        return;
       }
     }
     
-    // Also try matching just the last word (for single word matches)
-    if (spokenWords.length > 0) {
-      const lastWord = spokenWords[spokenWords.length - 1];
-      for (let i = this.currentWordIndex; i < searchEnd; i++) {
-        if (this.fuzzyMatch(lastWord, this.words[i].normalized)) {
-          if (bestScore < 2) {
-            bestMatch = i;
-            bestScore = 2;
-          }
-          break;
-        }
+    // Fuzzy match if no exact match
+    for (let i = searchStart; i < searchEnd; i++) {
+      if (this.fuzzyMatch(lastWord, this.words[i].normalized)) {
+        console.log(`Fuzzy match: "${lastWord}" ~ "${this.words[i].normalized}" at index ${i}`);
+        this.scrollToWord(i);
+        return;
       }
     }
     
-    console.log(`Matching: "${spokenWords.join(' ')}" -> index ${bestMatch} (score: ${bestScore}, current: ${this.currentWordIndex})`);
-    
-    if (bestMatch >= this.currentWordIndex && bestScore >= 2) {
-      this.scrollToWord(bestMatch);
-    }
+    console.log(`No match for: "${lastWord}" (searching ${searchStart}-${searchEnd})`);
   }
   
   fuzzyMatch(spoken, script) {
@@ -468,16 +434,8 @@ class SmartTeleprompter {
       
       this.currentScrollY = this.currentScrollY - (wordOffset - targetY);
       
-      // Smooth scroll
-      const scriptText = document.getElementById('script-text');
-      const mirrorMode = document.getElementById('mirror-mode-live')?.value || 'none';
-      let mirrorTransform = '';
-      if (mirrorMode === 'horizontal') mirrorTransform = 'scaleX(-1)';
-      else if (mirrorMode === 'vertical') mirrorTransform = 'scaleY(-1)';
-      else if (mirrorMode === 'both') mirrorTransform = 'scale(-1, -1)';
-      
-      scriptText.style.transition = 'transform 200ms ease-out';
-      scriptText.style.transform = `translateY(${this.currentScrollY}px) ${mirrorTransform}`.trim();
+      // Instant scroll (no lag)
+      this.applyScroll();
     }
   }
   
