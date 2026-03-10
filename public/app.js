@@ -113,10 +113,8 @@ class SmartTeleprompter {
             document.getElementById('transcript').textContent = transcript;
             this.onSpeechDetected();
             
-            // If not in auto-scroll mode, do word matching
-            if (!this.autoScrollMode) {
-              this.matchAndScroll(transcript);
-            }
+            // Always try to match words (for highlighting), scroll based on mode
+            this.matchAndScroll(transcript);
           }
         }
       };
@@ -329,44 +327,84 @@ class SmartTeleprompter {
   }
   
   matchAndScroll(transcript) {
-    const spokenWords = transcript.toLowerCase().split(/\s+/).map(w => this.normalizeWord(w)).filter(w => w);
+    const spokenWords = transcript.toLowerCase().split(/\s+/).map(w => this.normalizeWord(w)).filter(w => w.length > 0);
     
     if (spokenWords.length === 0) return;
     
-    const searchStart = Math.max(0, this.currentWordIndex - 2);
-    const searchEnd = Math.min(this.words.length, this.currentWordIndex + 20);
+    // Search a wider window
+    const searchStart = Math.max(0, this.currentWordIndex - 5);
+    const searchEnd = Math.min(this.words.length, this.currentWordIndex + 50);
     
     let bestMatch = -1;
     let bestScore = 0;
     
-    const recentSpoken = spokenWords.slice(-3);
+    // Try matching the last few spoken words
+    const recentSpoken = spokenWords.slice(-5);
     
     for (let i = searchStart; i < searchEnd; i++) {
       let score = 0;
+      let consecutiveMatches = 0;
+      
       for (let j = 0; j < recentSpoken.length && i + j < this.words.length; j++) {
-        if (this.fuzzyMatch(recentSpoken[j], this.words[i + j].normalized)) {
-          score += 1;
+        const spoken = recentSpoken[j];
+        const script = this.words[i + j].normalized;
+        
+        if (this.fuzzyMatch(spoken, script)) {
+          score += 2;
+          consecutiveMatches++;
+          // Bonus for consecutive matches
+          if (consecutiveMatches > 1) score += consecutiveMatches;
+        } else {
+          consecutiveMatches = 0;
         }
       }
       
       if (score > bestScore) {
         bestScore = score;
-        bestMatch = i + recentSpoken.length - 1;
+        bestMatch = i + Math.min(recentSpoken.length - 1, consecutiveMatches);
       }
     }
     
-    if (bestMatch > this.currentWordIndex && bestScore > 0) {
+    // Also try matching just the last word (for single word matches)
+    if (spokenWords.length > 0) {
+      const lastWord = spokenWords[spokenWords.length - 1];
+      for (let i = this.currentWordIndex; i < searchEnd; i++) {
+        if (this.fuzzyMatch(lastWord, this.words[i].normalized)) {
+          if (bestScore < 2) {
+            bestMatch = i;
+            bestScore = 2;
+          }
+          break;
+        }
+      }
+    }
+    
+    console.log(`Matching: "${recentSpoken.join(' ')}" -> index ${bestMatch} (score: ${bestScore})`);
+    
+    if (bestMatch >= this.currentWordIndex && bestScore >= 2) {
       this.scrollToWord(bestMatch);
     }
   }
   
   fuzzyMatch(spoken, script) {
+    if (!spoken || !script) return false;
     if (spoken === script) return true;
-    if (spoken.length < 2 || script.length < 2) return spoken === script;
+    
+    // Short words - must be exact or very close
+    if (spoken.length <= 2 || script.length <= 2) {
+      return spoken === script;
+    }
+    
+    // Check if one contains the other
     if (script.includes(spoken) || spoken.includes(script)) return true;
+    
+    // Check if they start the same (good for partial words during speech)
+    if (script.startsWith(spoken) || spoken.startsWith(script)) return true;
+    
+    // Levenshtein distance - more lenient threshold
     const distance = this.levenshtein(spoken, script);
     const maxLen = Math.max(spoken.length, script.length);
-    return distance / maxLen < 0.3;
+    return distance / maxLen < 0.4; // 40% tolerance
   }
   
   levenshtein(a, b) {
@@ -386,7 +424,12 @@ class SmartTeleprompter {
   }
   
   scrollToWord(index) {
-    if (index <= this.currentWordIndex) return;
+    if (index < this.currentWordIndex) return;
+    if (index === this.currentWordIndex) {
+      // Just update highlighting
+      this.highlightWord(index);
+      return;
+    }
     this.currentWordIndex = index;
     
     // Highlight current word
