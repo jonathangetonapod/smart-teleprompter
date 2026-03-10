@@ -160,42 +160,21 @@ class SmartTeleprompter {
   
   async setupElevenLabs() {
     try {
-      // Get single-use token from server (browser WebSocket can't send headers)
-      document.getElementById('mic-status').textContent = '🎤 Getting ElevenLabs token...';
-      const response = await fetch('/api/elevenlabs-token');
-      const data = await response.json();
-      
-      if (data.error || !data.token) {
-        console.error('Failed to get ElevenLabs token:', data.error);
-        document.getElementById('mic-status').textContent = '⚠️ ElevenLabs Token Error';
-        this.fallbackToWebSpeech();
-        return;
-      }
-      
-      const token = data.token;
-      console.log('Got ElevenLabs token');
-      
-      // Get microphone access
+      // Get microphone access first
       this.audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
       // Get selected language
       const language = document.getElementById('language')?.value || 'en';
-      const langCode = language === 'multi' ? '' : language;
       
-      // Build WebSocket URL with token (single-use token for client-side auth)
-      const wsUrl = new URL('wss://api.elevenlabs.io/v1/speech-to-text/realtime');
-      wsUrl.searchParams.set('token', token);
-      wsUrl.searchParams.set('model_id', 'scribe_v2_realtime');
-      wsUrl.searchParams.set('audio_format', 'pcm_16000');
-      wsUrl.searchParams.set('commit_strategy', 'vad');
-      wsUrl.searchParams.set('vad_silence_threshold_secs', '0.5');
-      wsUrl.searchParams.set('min_silence_duration_ms', '50');
-      if (langCode) wsUrl.searchParams.set('language_code', langCode);
+      // Connect to our server-side proxy (which handles ElevenLabs auth)
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws/elevenlabs?language=${language}`;
       
-      console.log('Connecting to ElevenLabs with token...');
+      console.log('Connecting to ElevenLabs proxy:', wsUrl);
+      document.getElementById('mic-status').textContent = '🎤 Connecting to ElevenLabs...';
       
-      // Connect to ElevenLabs Scribe WebSocket
-      this.sttSocket = new WebSocket(wsUrl.toString());
+      // Connect to proxy WebSocket
+      this.sttSocket = new WebSocket(wsUrl);
       
       this.sttSocket.onopen = () => {
         console.log('ElevenLabs WebSocket opened');
@@ -208,6 +187,19 @@ class SmartTeleprompter {
         
         const data = JSON.parse(event.data);
         console.log('ElevenLabs message:', data);
+        
+        // Handle proxy connected
+        if (data.type === 'proxy_connected') {
+          console.log('Proxy connected to ElevenLabs');
+          return;
+        }
+        
+        // Handle proxy error
+        if (data.type === 'proxy_error') {
+          console.error('Proxy error:', data.error);
+          document.getElementById('mic-status').textContent = '⚠️ ElevenLabs Error';
+          return;
+        }
         
         // Handle session started
         if (data.message_type === 'session_started') {

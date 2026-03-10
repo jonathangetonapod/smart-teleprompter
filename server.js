@@ -1,8 +1,14 @@
 const express = require('express');
 const path = require('path');
+const WebSocket = require('ws');
+const http = require('http');
 
 const app = express();
+const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
+
+// WebSocket server for ElevenLabs proxy
+const wss = new WebSocket.Server({ server, path: '/ws/elevenlabs' });
 
 // API keys
 const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY || 'aae323f183d9722757af4b74b651d3c6e37b23e4';
@@ -127,6 +133,72 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.listen(PORT, () => {
+// ElevenLabs WebSocket proxy
+wss.on('connection', (clientWs, req) => {
+  console.log('Client connected to ElevenLabs proxy');
+  
+  // Parse language from query string
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const language = url.searchParams.get('language') || 'en';
+  
+  // Build ElevenLabs WebSocket URL
+  const elevenLabsUrl = new URL('wss://api.elevenlabs.io/v1/speech-to-text/realtime');
+  elevenLabsUrl.searchParams.set('model_id', 'scribe_v2_realtime');
+  elevenLabsUrl.searchParams.set('audio_format', 'pcm_16000');
+  elevenLabsUrl.searchParams.set('commit_strategy', 'vad');
+  elevenLabsUrl.searchParams.set('vad_silence_threshold_secs', '0.5');
+  elevenLabsUrl.searchParams.set('min_silence_duration_ms', '50');
+  if (language && language !== 'multi') {
+    elevenLabsUrl.searchParams.set('language_code', language);
+  }
+  
+  // Connect to ElevenLabs with API key in header
+  const elevenLabsWs = new WebSocket(elevenLabsUrl.toString(), {
+    headers: {
+      'xi-api-key': ELEVENLABS_API_KEY
+    }
+  });
+  
+  elevenLabsWs.on('open', () => {
+    console.log('Connected to ElevenLabs');
+    clientWs.send(JSON.stringify({ type: 'proxy_connected' }));
+  });
+  
+  elevenLabsWs.on('message', (data) => {
+    // Forward ElevenLabs messages to client
+    if (clientWs.readyState === WebSocket.OPEN) {
+      clientWs.send(data.toString());
+    }
+  });
+  
+  elevenLabsWs.on('error', (error) => {
+    console.error('ElevenLabs WebSocket error:', error.message);
+    clientWs.send(JSON.stringify({ type: 'proxy_error', error: error.message }));
+  });
+  
+  elevenLabsWs.on('close', (code, reason) => {
+    console.log('ElevenLabs WebSocket closed:', code, reason.toString());
+    clientWs.close();
+  });
+  
+  // Forward client messages to ElevenLabs
+  clientWs.on('message', (data) => {
+    if (elevenLabsWs.readyState === WebSocket.OPEN) {
+      elevenLabsWs.send(data);
+    }
+  });
+  
+  clientWs.on('close', () => {
+    console.log('Client disconnected from proxy');
+    elevenLabsWs.close();
+  });
+  
+  clientWs.on('error', (error) => {
+    console.error('Client WebSocket error:', error.message);
+    elevenLabsWs.close();
+  });
+});
+
+server.listen(PORT, () => {
   console.log(`🎬 Smart Teleprompter running on port ${PORT}`);
 });
