@@ -19,11 +19,7 @@ class SmartTeleprompter {
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 3;
 
-    // Predictive word advance — highlights words immediately based on speaking pace
-    this.predictiveInterval = null;
-    this.isSpeaking = false;
-    this.wordsPerSecond = 2.8; // ~170 wpm average speaking rate
-    this.lastSTTIndex = 0;     // last position confirmed by STT
+    this.lastSTTIndex = 0;
     this.currentPhraseIndex = 0;
     this.phrases = [];
     this.pauseAfterPhrase = new Set();
@@ -207,7 +203,6 @@ class SmartTeleprompter {
     if (this.autoScrollMode && !this.isScrolling && !this.isPaused) {
       this.startAutoScroll();
     }
-    this.startPredictiveAdvance();
   }
 
   onSpeechDetected() {
@@ -216,73 +211,18 @@ class SmartTeleprompter {
     if (this.autoScrollMode && !this.isScrolling && !this.isPaused) {
       this.startAutoScroll();
     }
-    this.startPredictiveAdvance();
 
-    // Clear existing silence timeout
     if (this.silenceTimeout) {
       clearTimeout(this.silenceTimeout);
     }
 
-    // Stop after 1.5 seconds of silence
     this.silenceTimeout = setTimeout(() => {
       if (this.autoScrollMode && this.isScrolling) {
         this.stopAutoScroll();
       }
-      this.stopPredictiveAdvance();
     }, 1500);
   }
 
-  startPredictiveAdvance() {
-    if (this.predictiveInterval || this.isPaused) return;
-    this.isSpeaking = true;
-
-    const advancePhrase = () => {
-      if (!this.isSpeaking || this.isPaused) return;
-
-      const currentPhrase = this.phrases[this.currentPhraseIndex];
-      if (!currentPhrase) return;
-
-      const nextPhraseIndex = this.currentPhraseIndex + 1;
-      if (nextPhraseIndex < this.phrases.length) {
-        const nextPhrase = this.phrases[nextPhraseIndex];
-        this.currentPhraseIndex = nextPhraseIndex;
-        this.currentWordIndex = nextPhrase.endWordIndex;
-        this.highlightPhrase(nextPhraseIndex);
-
-        if (!this.autoScrollMode) {
-          const el = this._phraseElements?.[nextPhraseIndex];
-          if (el) {
-            const container = document.getElementById('script-container');
-            const containerRect = container.getBoundingClientRect();
-            const targetY = containerRect.height * 0.3;
-            const phraseRect = el.getBoundingClientRect();
-            const phraseOffset = phraseRect.top - containerRect.top;
-            this.currentScrollY -= (phraseOffset - targetY);
-            this.applyScroll(true);
-          }
-        }
-
-        const wordsInNextPhrase = nextPhrase.words.length;
-        const msForPhrase = (wordsInNextPhrase / this.wordsPerSecond) * 1000;
-        const pauseTime = this.pauseAfterPhrase.has(nextPhraseIndex) ? 800 : 0;
-        this.predictiveInterval = setTimeout(advancePhrase, msForPhrase + pauseTime);
-      }
-    };
-
-    const currentPhrase = this.phrases[this.currentPhraseIndex];
-    const wordsInPhrase = currentPhrase ? currentPhrase.words.length : 3;
-    const msForPhrase = (wordsInPhrase / this.wordsPerSecond) * 1000;
-    this.predictiveInterval = setTimeout(advancePhrase, msForPhrase);
-  }
-
-  stopPredictiveAdvance() {
-    this.isSpeaking = false;
-    if (this.predictiveInterval) {
-      clearTimeout(this.predictiveInterval);
-      this.predictiveInterval = null;
-    }
-  }
-  
   startAutoScroll() {
     if (this.isScrolling) return;
     this.isScrolling = true;
@@ -536,29 +476,14 @@ class SmartTeleprompter {
 
     if (spokenWords.length === 0) return;
 
-    // Adaptive search window — allow small backward correction, wide forward range
-    const searchStart = Math.max(0, this.currentWordIndex - 5);
-    const searchEnd = Math.min(this.words.length, this.currentWordIndex + 80);
+    // Only search FORWARD from current position — no backward jumps
+    const searchStart = this.currentWordIndex;
+    const searchEnd = Math.min(this.words.length, this.currentWordIndex + 50);
 
-    // Fast path: 1-2 words — direct match for lowest latency
-    if (spokenWords.length <= 2) {
-      const lastWord = spokenWords[spokenWords.length - 1];
-      for (let i = searchStart; i < searchEnd; i++) {
-        if (this.words[i].normalized === lastWord) {
-          this.scrollToWord(i);
-          return;
-        }
-      }
-      for (let i = searchStart; i < searchEnd; i++) {
-        if (this.fuzzyMatch(lastWord, this.words[i].normalized)) {
-          this.scrollToWord(i);
-          return;
-        }
-      }
-      return;
-    }
+    // Need at least 2 spoken words for reliable matching (single words too ambiguous)
+    if (spokenWords.length < 2) return;
 
-    // Full path: 3+ words — sequence matching for accuracy
+    // Use last N spoken words for sequence matching
     const windowSize = Math.min(spokenWords.length, 6);
     const matchWords = spokenWords.slice(-windowSize);
 
@@ -587,7 +512,8 @@ class SmartTeleprompter {
         maxConsecutive = Math.max(maxConsecutive, consecutive);
       }
 
-      const totalScore = score + maxConsecutive * 0.5 + (i >= this.currentWordIndex ? 0.1 : 0);
+      // Only consider positions ahead of current
+      const totalScore = score + maxConsecutive * 0.5;
 
       if (totalScore > bestScore) {
         bestScore = totalScore;
@@ -595,7 +521,8 @@ class SmartTeleprompter {
       }
     }
 
-    if (bestIndex >= 0 && bestScore >= 3) {
+    // Require strong confidence: at least 2 exact word matches worth of score
+    if (bestIndex >= 0 && bestScore >= 4) {
       this.scrollToWord(bestIndex);
     }
   }
@@ -638,13 +565,15 @@ class SmartTeleprompter {
   }
   
   scrollToWord(index) {
-    if (index < this.currentWordIndex - 10) return;
-    if (index === this.currentWordIndex) return;
+    // Only move forward — you don't re-read on a teleprompter
+    if (index <= this.currentWordIndex) return;
 
     this.lastSTTIndex = index;
     this.currentWordIndex = index;
 
     const newPhraseIndex = this.phraseIndexForWord(index);
+    // Only advance phrase, never go backward
+    if (newPhraseIndex <= this.currentPhraseIndex) return;
     this.currentPhraseIndex = newPhraseIndex;
     this.highlightPhrase(newPhraseIndex);
 
@@ -676,7 +605,6 @@ class SmartTeleprompter {
       btn.textContent = '▶️ Resume';
       btn.classList.add('paused');
       this.stopAutoScroll();
-      this.stopPredictiveAdvance();
       document.getElementById('mic-status').textContent = '⏸️ Paused';
     } else {
       btn.textContent = '⏸️ Pause';
@@ -693,7 +621,6 @@ class SmartTeleprompter {
     this._wordElements = null;
     this._phraseElements = null;
     this._prevPhraseIndex = -1;
-    this.stopPredictiveAdvance();
     this.renderScript();
     this.applyScroll();
     this.stopAutoScroll();
@@ -703,7 +630,6 @@ class SmartTeleprompter {
     this.isListening = false;
     this.isPaused = false;
     this.stopAutoScroll();
-    this.stopPredictiveAdvance();
     
     if (this.silenceTimeout) {
       clearTimeout(this.silenceTimeout);
