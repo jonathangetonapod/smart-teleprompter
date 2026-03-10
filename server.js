@@ -1,19 +1,12 @@
 const express = require('express');
 const path = require('path');
-const WebSocket = require('ws');
-const http = require('http');
 
 const app = express();
-const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
-
-// WebSocket server for ElevenLabs proxy
-const wss = new WebSocket.Server({ server, path: '/ws/elevenlabs' });
 
 // API keys
 const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY || 'aae323f183d9722757af4b74b651d3c6e37b23e4';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || '';
 
 app.use(express.static('public'));
 app.use(express.json());
@@ -23,47 +16,8 @@ app.get('/api/deepgram-key', (req, res) => {
   res.json({ apiKey: DEEPGRAM_API_KEY });
 });
 
-app.get('/api/elevenlabs-key', (req, res) => {
-  res.json({ apiKey: ELEVENLABS_API_KEY });
-});
-
-// Get ElevenLabs single-use token for WebSocket auth
-app.get('/api/elevenlabs-token', async (req, res) => {
-  if (!ELEVENLABS_API_KEY) {
-    return res.status(500).json({ error: 'No ElevenLabs API key configured' });
-  }
-  
-  try {
-    const response = await fetch('https://api.elevenlabs.io/v1/speech-to-text/token', {
-      method: 'POST',
-      headers: {
-        'xi-api-key': ELEVENLABS_API_KEY,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        max_duration_secs: 3600  // 1 hour token
-      })
-    });
-    
-    const data = await response.json();
-    console.log('ElevenLabs token response:', data);
-    
-    if (data.token) {
-      res.json({ token: data.token });
-    } else {
-      res.status(500).json({ error: 'Failed to get token', details: data });
-    }
-  } catch (error) {
-    console.error('Error getting ElevenLabs token:', error);
-    res.status(500).json({ error: 'Failed to get token: ' + error.message });
-  }
-});
-
 app.get('/api/keys', (req, res) => {
-  res.json({ 
-    deepgram: DEEPGRAM_API_KEY,
-    elevenlabs: ELEVENLABS_API_KEY 
-  });
+  res.json({ deepgram: DEEPGRAM_API_KEY });
 });
 
 // Endpoint to convert text to teleprompter script using Claude
@@ -94,17 +48,20 @@ app.post('/api/convert-script', async (req, res) => {
         max_tokens: 4096,
         messages: [{
           role: 'user',
-          content: `Convert the following notes/content into a clean, natural teleprompter script for someone recording a video. 
+          content: `You are a teleprompter script writer. Convert the following notes into a script optimized for reading aloud on camera.
 
-Rules:
-- Write in a conversational, natural speaking tone
-- Break into short, easy-to-read sentences
-- Remove bullet points, formatting, headers
-- Add natural transitions between ideas
-- Keep the same meaning and key points
-- Make it flow smoothly when read aloud
-- Don't add [pause] or stage directions
-- Just output the clean script text, nothing else
+CRITICAL RULES — follow every single one:
+- Write like you TALK, not like you write. Use contractions (I'm, you're, we'll, don't, can't, it's).
+- Short sentences. Max 12 words per sentence. One idea per sentence.
+- Use fragments when natural. "Pretty cool, right?" "Here's the thing." "Quick example."
+- Start sentences with "So", "Now", "Look", "Here's the thing" — conversational starters.
+- Add rhetorical questions to break up long stretches: "Sound familiar?" "Make sense?"
+- Break paragraphs often. Every 2-3 sentences, start a new paragraph.
+- Put a blank line between paragraphs (these become breathing pauses).
+- Write the hook (first 2 sentences) and CTA (last 2 sentences) word-for-word and punchy.
+- NO stage directions, NO [pause], NO (emphasis), NO markdown formatting.
+- NO bullet points, NO headers, NO numbered lists.
+- Just clean spoken text, paragraph by paragraph.
 
 Content to convert:
 ${text}`
@@ -133,72 +90,6 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// ElevenLabs WebSocket proxy
-wss.on('connection', (clientWs, req) => {
-  console.log('Client connected to ElevenLabs proxy');
-  
-  // Parse language from query string
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  const language = url.searchParams.get('language') || 'en';
-  
-  // Build ElevenLabs WebSocket URL
-  const elevenLabsUrl = new URL('wss://api.elevenlabs.io/v1/speech-to-text/realtime');
-  elevenLabsUrl.searchParams.set('model_id', 'scribe_v2_realtime');
-  elevenLabsUrl.searchParams.set('audio_format', 'pcm_16000');
-  elevenLabsUrl.searchParams.set('commit_strategy', 'vad');
-  elevenLabsUrl.searchParams.set('vad_silence_threshold_secs', '0.5');
-  elevenLabsUrl.searchParams.set('min_silence_duration_ms', '50');
-  if (language && language !== 'multi') {
-    elevenLabsUrl.searchParams.set('language_code', language);
-  }
-  
-  // Connect to ElevenLabs with API key in header
-  const elevenLabsWs = new WebSocket(elevenLabsUrl.toString(), {
-    headers: {
-      'xi-api-key': ELEVENLABS_API_KEY
-    }
-  });
-  
-  elevenLabsWs.on('open', () => {
-    console.log('Connected to ElevenLabs');
-    clientWs.send(JSON.stringify({ type: 'proxy_connected' }));
-  });
-  
-  elevenLabsWs.on('message', (data) => {
-    // Forward ElevenLabs messages to client
-    if (clientWs.readyState === WebSocket.OPEN) {
-      clientWs.send(data.toString());
-    }
-  });
-  
-  elevenLabsWs.on('error', (error) => {
-    console.error('ElevenLabs WebSocket error:', error.message);
-    clientWs.send(JSON.stringify({ type: 'proxy_error', error: error.message }));
-  });
-  
-  elevenLabsWs.on('close', (code, reason) => {
-    console.log('ElevenLabs WebSocket closed:', code, reason.toString());
-    clientWs.close();
-  });
-  
-  // Forward client messages to ElevenLabs
-  clientWs.on('message', (data) => {
-    if (elevenLabsWs.readyState === WebSocket.OPEN) {
-      elevenLabsWs.send(data);
-    }
-  });
-  
-  clientWs.on('close', () => {
-    console.log('Client disconnected from proxy');
-    elevenLabsWs.close();
-  });
-  
-  clientWs.on('error', (error) => {
-    console.error('Client WebSocket error:', error.message);
-    elevenLabsWs.close();
-  });
-});
-
-server.listen(PORT, () => {
+app.listen(PORT, () => {
   console.log(`🎬 Smart Teleprompter running on port ${PORT}`);
 });

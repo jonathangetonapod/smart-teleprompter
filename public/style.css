@@ -168,28 +168,59 @@ body.light-mode select {
   transform: scale(-1, -1);
 }
 
-#script-text .word {
+/* Phrase-level display */
+#script-text .phrase {
+  display: inline;
+  padding: 4px 2px;
+  border-radius: 6px;
+  transition: opacity 0.3s ease, background 0.3s ease;
+  opacity: 0.25;
+}
+
+#script-text .phrase.spoken-phrase {
+  opacity: 0.15;
+}
+
+#script-text .phrase.current-phrase {
+  opacity: 1;
+  background: rgba(102, 126, 234, 0.15);
+  border-radius: 8px;
+}
+
+#script-text .phrase.near-phrase {
+  opacity: 0.7;
+}
+
+#script-text .phrase .word {
   display: inline;
   padding: 2px 4px;
   border-radius: 4px;
-  transition: background 0.2s, color 0.2s;
 }
 
-#script-text .word.spoken {
-  opacity: 0.4;
+#script-text .phrase.current-phrase .word {
+  color: #fff;
 }
 
-#script-text .word.current {
-  background: #667eea;
-  color: white;
-  opacity: 1;
+body.light-mode #script-text .phrase.current-phrase .word {
+  color: #111;
 }
 
-#script-text .word.upcoming {
-  opacity: 1;
+.pause-marker {
+  display: block;
+  height: 40px;
+  position: relative;
 }
 
-/* Focus line in center */
+.pause-marker::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 30%;
+  right: 30%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(102, 126, 234, 0.3), transparent);
+}
+
 #script-container::before {
   content: '';
   position: absolute;
@@ -197,7 +228,7 @@ body.light-mode select {
   left: 0;
   right: 0;
   height: 3px;
-  background: linear-gradient(90deg, transparent, #667eea, transparent);
+  background: linear-gradient(90deg, transparent, rgba(102, 126, 234, 0.5), transparent);
   pointer-events: none;
   z-index: 10;
 }

@@ -16,7 +16,18 @@ class SmartTeleprompter {
     this.lastSpeechTime = 0;
     this.silenceTimeout = null;
     this.sttProvider = 'deepgram';  // 'deepgram' or 'elevenlabs'
-    
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 3;
+
+    // Predictive word advance — highlights words immediately based on speaking pace
+    this.predictiveInterval = null;
+    this.isSpeaking = false;
+    this.wordsPerSecond = 2.8; // ~170 wpm average speaking rate
+    this.lastSTTIndex = 0;     // last position confirmed by STT
+    this.currentPhraseIndex = 0;
+    this.phrases = [];
+    this.pauseAfterPhrase = new Set();
+
     this.init();
   }
   
@@ -78,14 +89,8 @@ class SmartTeleprompter {
   }
   
   async setupSTT() {
-    this.sttProvider = document.getElementById('stt-provider')?.value || 'deepgram';
-    console.log('Setting up STT provider:', this.sttProvider);
-    
-    if (this.sttProvider === 'elevenlabs') {
-      await this.setupElevenLabs();
-    } else {
-      await this.setupDeepgram();
-    }
+    console.log('Setting up Deepgram STT');
+    await this.setupDeepgram();
   }
   
   async setupDeepgram() {
@@ -100,14 +105,15 @@ class SmartTeleprompter {
       // Get selected language
       const language = document.getElementById('language')?.value || 'en';
       
-      // Connect to Deepgram WebSocket (Nova-3 with smart_format)
+      // Connect to Deepgram WebSocket (Nova-3, optimized for low latency)
       this.sttSocket = new WebSocket(
-        `wss://api.deepgram.com/v1/listen?model=nova-3&language=${language}&smart_format=true&interim_results=true&endpointing=300&encoding=linear16&sample_rate=16000`,
+        `wss://api.deepgram.com/v1/listen?model=nova-3&language=${language}&interim_results=true&endpointing=150&no_delay=true&encoding=linear16&sample_rate=16000`,
         ['token', apiKey]
       );
       
       this.sttSocket.onopen = () => {
         console.log('Deepgram connected');
+        this.reconnectAttempts = 0;
         document.getElementById('mic-status').textContent = '🎤 Deepgram Nova-3 Connected';
         this.startRecording();
       };
@@ -145,10 +151,15 @@ class SmartTeleprompter {
       
       this.sttSocket.onclose = (event) => {
         console.log('Deepgram disconnected', event.code, event.reason);
-        // Don't auto-reconnect if we closed intentionally or auth failed
         if (this.isListening && !this.isPaused && event.code !== 1000) {
-          console.log('Reconnecting in 2 seconds...');
-          setTimeout(() => this.setupDeepgram(), 2000);
+          this.reconnectAttempts++;
+          if (this.reconnectAttempts <= this.maxReconnectAttempts) {
+            console.log(`Reconnecting Deepgram (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
+            setTimeout(() => this.setupDeepgram(), 2000);
+          } else {
+            console.log('Deepgram reconnect limit reached, falling back to Web Speech');
+            this.fallbackToWebSpeech();
+          }
         }
       };
       
@@ -158,150 +169,12 @@ class SmartTeleprompter {
     }
   }
   
-  async setupElevenLabs() {
-    try {
-      // Get microphone access first
-      this.audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      
-      // Get selected language
-      const language = document.getElementById('language')?.value || 'en';
-      
-      // Connect to our server-side proxy (which handles ElevenLabs auth)
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws/elevenlabs?language=${language}`;
-      
-      console.log('Connecting to ElevenLabs proxy:', wsUrl);
-      document.getElementById('mic-status').textContent = '🎤 Connecting to ElevenLabs...';
-      
-      // Connect to proxy WebSocket
-      this.sttSocket = new WebSocket(wsUrl);
-      
-      this.sttSocket.onopen = () => {
-        console.log('ElevenLabs WebSocket opened');
-        document.getElementById('mic-status').textContent = '🎤 ElevenLabs Scribe Connected';
-        this.startRecordingElevenLabs();
-      };
-      
-      this.sttSocket.onmessage = (event) => {
-        if (this.isPaused) return;
-        
-        const data = JSON.parse(event.data);
-        console.log('ElevenLabs message:', data);
-        
-        // Handle proxy connected
-        if (data.type === 'proxy_connected') {
-          console.log('Proxy connected to ElevenLabs');
-          return;
-        }
-        
-        // Handle proxy error
-        if (data.type === 'proxy_error') {
-          console.error('Proxy error:', data.error);
-          document.getElementById('mic-status').textContent = '⚠️ ElevenLabs Error';
-          return;
-        }
-        
-        // Handle session started
-        if (data.message_type === 'session_started') {
-          console.log('ElevenLabs session started:', data.session_id);
-          return;
-        }
-        
-        // Handle partial transcript (interim results)
-        if (data.message_type === 'partial_transcript' && data.text) {
-          console.log('Partial:', data.text);
-          document.getElementById('transcript').textContent = data.text;
-          this.onSpeechDetected();
-          this.matchAndScroll(data.text);
-        }
-        
-        // Handle committed transcript (final results)
-        if (data.message_type === 'committed_transcript' && data.text) {
-          console.log('Final:', data.text);
-          document.getElementById('transcript').textContent = data.text;
-          this.onSpeechDetected();
-          this.matchAndScroll(data.text);
-        }
-        
-        // Handle committed transcript with timestamps
-        if (data.message_type === 'committed_transcript_with_timestamps' && data.text) {
-          console.log('Final w/ timestamps:', data.text);
-          document.getElementById('transcript').textContent = data.text;
-          this.onSpeechDetected();
-          this.matchAndScroll(data.text);
-        }
-        
-        // Handle errors
-        if (data.message_type && data.message_type.includes('error')) {
-          console.error('ElevenLabs error:', data);
-        }
-      };
-      
-      this.sttSocket.onerror = (error) => {
-        console.error('ElevenLabs error:', error);
-        document.getElementById('mic-status').textContent = '⚠️ ElevenLabs Error - Using Fallback';
-        this.fallbackToWebSpeech();
-      };
-      
-      this.sttSocket.onclose = (event) => {
-        console.log('ElevenLabs disconnected', event.code, event.reason);
-        if (this.isListening && !this.isPaused && event.code !== 1000) {
-          console.log('Reconnecting in 2 seconds...');
-          setTimeout(() => this.setupElevenLabs(), 2000);
-        }
-      };
-      
-    } catch (error) {
-      console.error('Failed to setup ElevenLabs:', error);
-      this.fallbackToWebSpeech();
-    }
-  }
-  
-  startRecordingElevenLabs() {
-    try {
-      const audioContext = new AudioContext({ sampleRate: 16000 });
-      const source = audioContext.createMediaStreamSource(this.audioStream);
-      // Use smaller buffer for lower latency (1024 = 64ms at 16kHz)
-      const processor = audioContext.createScriptProcessor(1024, 1, 1);
-      
-      let audioSent = 0;
-      
-      processor.onaudioprocess = (e) => {
-        if (this.sttSocket?.readyState === WebSocket.OPEN && !this.isPaused) {
-          const inputData = e.inputBuffer.getChannelData(0);
-          const pcmData = new Int16Array(inputData.length);
-          for (let i = 0; i < inputData.length; i++) {
-            pcmData[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
-          }
-          // ElevenLabs expects audio as base64 in input_audio_chunk message
-          const base64Audio = btoa(String.fromCharCode.apply(null, new Uint8Array(pcmData.buffer)));
-          this.sttSocket.send(JSON.stringify({
-            message_type: 'input_audio_chunk',
-            audio_base_64: base64Audio
-          }));
-          audioSent++;
-          if (audioSent % 100 === 0) {
-            console.log(`Audio chunks sent: ${audioSent}`);
-          }
-        }
-      };
-      
-      source.connect(processor);
-      processor.connect(audioContext.destination);
-      this.audioContext = audioContext;
-      this.processor = processor;
-      console.log('ElevenLabs audio recording started (1024 buffer)');
-    } catch (error) {
-      console.error('Error starting ElevenLabs recording:', error);
-    }
-  }
-  
   startRecording() {
     try {
       const audioContext = new AudioContext({ sampleRate: 16000 });
       const source = audioContext.createMediaStreamSource(this.audioStream);
-      // Use smaller buffer for lower latency (1024 = 64ms at 16kHz)
-      const processor = audioContext.createScriptProcessor(1024, 1, 1);
+      // Minimal buffer for lowest latency (512 = 32ms at 16kHz)
+      const processor = audioContext.createScriptProcessor(512, 1, 1);
       
       let audioSent = 0;
       
@@ -334,26 +207,80 @@ class SmartTeleprompter {
     if (this.autoScrollMode && !this.isScrolling && !this.isPaused) {
       this.startAutoScroll();
     }
+    this.startPredictiveAdvance();
   }
-  
+
   onSpeechDetected() {
     this.lastSpeechTime = Date.now();
-    
+
     if (this.autoScrollMode && !this.isScrolling && !this.isPaused) {
       this.startAutoScroll();
     }
-    
+    this.startPredictiveAdvance();
+
     // Clear existing silence timeout
     if (this.silenceTimeout) {
       clearTimeout(this.silenceTimeout);
     }
-    
-    // Stop scrolling after 1.5 seconds of silence
+
+    // Stop after 1.5 seconds of silence
     this.silenceTimeout = setTimeout(() => {
       if (this.autoScrollMode && this.isScrolling) {
         this.stopAutoScroll();
       }
+      this.stopPredictiveAdvance();
     }, 1500);
+  }
+
+  startPredictiveAdvance() {
+    if (this.predictiveInterval || this.isPaused) return;
+    this.isSpeaking = true;
+
+    const advancePhrase = () => {
+      if (!this.isSpeaking || this.isPaused) return;
+
+      const currentPhrase = this.phrases[this.currentPhraseIndex];
+      if (!currentPhrase) return;
+
+      const nextPhraseIndex = this.currentPhraseIndex + 1;
+      if (nextPhraseIndex < this.phrases.length) {
+        const nextPhrase = this.phrases[nextPhraseIndex];
+        this.currentPhraseIndex = nextPhraseIndex;
+        this.currentWordIndex = nextPhrase.endWordIndex;
+        this.highlightPhrase(nextPhraseIndex);
+
+        if (!this.autoScrollMode) {
+          const el = this._phraseElements?.[nextPhraseIndex];
+          if (el) {
+            const container = document.getElementById('script-container');
+            const containerRect = container.getBoundingClientRect();
+            const targetY = containerRect.height * 0.3;
+            const phraseRect = el.getBoundingClientRect();
+            const phraseOffset = phraseRect.top - containerRect.top;
+            this.currentScrollY -= (phraseOffset - targetY);
+            this.applyScroll(true);
+          }
+        }
+
+        const wordsInNextPhrase = nextPhrase.words.length;
+        const msForPhrase = (wordsInNextPhrase / this.wordsPerSecond) * 1000;
+        const pauseTime = this.pauseAfterPhrase.has(nextPhraseIndex) ? 800 : 0;
+        this.predictiveInterval = setTimeout(advancePhrase, msForPhrase + pauseTime);
+      }
+    };
+
+    const currentPhrase = this.phrases[this.currentPhraseIndex];
+    const wordsInPhrase = currentPhrase ? currentPhrase.words.length : 3;
+    const msForPhrase = (wordsInPhrase / this.wordsPerSecond) * 1000;
+    this.predictiveInterval = setTimeout(advancePhrase, msForPhrase);
+  }
+
+  stopPredictiveAdvance() {
+    this.isSpeaking = false;
+    if (this.predictiveInterval) {
+      clearTimeout(this.predictiveInterval);
+      this.predictiveInterval = null;
+    }
   }
   
   startAutoScroll() {
@@ -416,10 +343,7 @@ class SmartTeleprompter {
       
       document.getElementById('transcript').textContent = transcript;
       this.onSpeechDetected();
-      
-      if (!this.autoScrollMode) {
-        this.matchAndScroll(transcript);
-      }
+      this.matchAndScroll(transcript);
     };
     
     this.recognition.onend = () => {
@@ -465,68 +389,215 @@ class SmartTeleprompter {
   }
   
   parseScript(text) {
-    this.words = text.split(/\s+/).map((word, index) => ({
-      original: word,
-      normalized: this.normalizeWord(word),
-      index: index
-    }));
+    const lines = text.split(/\n+/);
+    this.words = [];
+    this.phrases = [];
+    this.pauseAfterPhrase = new Set();
+
+    let wordIndex = 0;
+    let phraseIndex = 0;
+
+    for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+      const line = lines[lineIdx].trim();
+      if (!line) {
+        if (phraseIndex > 0) {
+          this.pauseAfterPhrase.add(phraseIndex - 1);
+        }
+        continue;
+      }
+
+      const lineWords = line.split(/\s+/).filter(w => w.length > 0);
+      let phraseWords = [];
+
+      for (let i = 0; i < lineWords.length; i++) {
+        const word = lineWords[i];
+        const wordObj = {
+          original: word,
+          normalized: this.normalizeWord(word),
+          index: wordIndex,
+          phraseIndex: phraseIndex
+        };
+        this.words.push(wordObj);
+        phraseWords.push(wordObj);
+        wordIndex++;
+
+        const endsWithPunctuation = /[.!?;:,]$/.test(word);
+        const nextIsConjunction = i + 1 < lineWords.length &&
+          /^(and|but|so|because|when|if|then|now|also|however|or|yet|still|next|first|finally|actually|honestly|basically|look|see|think|remember)$/i
+            .test(lineWords[i + 1]);
+        const atMaxLength = phraseWords.length >= 5;
+        const atMinLength = phraseWords.length >= 3;
+
+        if (phraseWords.length > 0 && (
+          (endsWithPunctuation && atMinLength) ||
+          (nextIsConjunction && atMinLength) ||
+          atMaxLength ||
+          i === lineWords.length - 1
+        )) {
+          this.phrases.push({
+            words: [...phraseWords],
+            index: phraseIndex,
+            startWordIndex: phraseWords[0].index,
+            endWordIndex: phraseWords[phraseWords.length - 1].index
+          });
+          phraseIndex++;
+          phraseWords = [];
+        }
+      }
+
+      if (phraseWords.length > 0) {
+        this.phrases.push({
+          words: [...phraseWords],
+          index: phraseIndex,
+          startWordIndex: phraseWords[0].index,
+          endWordIndex: phraseWords[phraseWords.length - 1].index
+        });
+        phraseIndex++;
+      }
+    }
+
     this.currentWordIndex = 0;
+    this.currentPhraseIndex = 0;
   }
   
   normalizeWord(word) {
     return word.toLowerCase().replace(/[^a-z0-9]/g, '');
   }
-  
+
+  phraseIndexForWord(wordIndex) {
+    for (let i = 0; i < this.phrases.length; i++) {
+      if (wordIndex >= this.phrases[i].startWordIndex && wordIndex <= this.phrases[i].endWordIndex) {
+        return i;
+      }
+    }
+    return this.phrases.length - 1;
+  }
+
   renderScript() {
     const container = document.getElementById('script-text');
-    container.innerHTML = this.words.map((word, i) => 
-      `<span class="word ${i === 0 ? 'current' : ''}" data-index="${i}">${word.original} </span>`
-    ).join('');
+    let html = '';
+
+    for (let p = 0; p < this.phrases.length; p++) {
+      const phrase = this.phrases[p];
+      const phraseClass = p === 0 ? 'phrase current-phrase' : 'phrase';
+      html += `<span class="${phraseClass}" data-phrase="${p}">`;
+      for (const word of phrase.words) {
+        html += `<span class="word" data-index="${word.index}">${word.original} </span>`;
+      }
+      html += '</span>';
+
+      if (this.pauseAfterPhrase.has(p)) {
+        html += '<span class="pause-marker" aria-hidden="true"></span>';
+      }
+    }
+
+    container.innerHTML = html;
     container.style.fontSize = `${this.fontSize}px`;
+
+    this._wordElements = container.querySelectorAll('.word');
+    this._phraseElements = container.querySelectorAll('.phrase');
+    this._prevPhraseIndex = -1;
   }
   
-  highlightWord(index) {
-    document.querySelectorAll('.word').forEach((el, i) => {
-      el.classList.remove('spoken', 'current');
-      if (i < index) {
-        el.classList.add('spoken');
-      } else if (i === index) {
-        el.classList.add('current');
+  highlightPhrase(phraseIndex) {
+    if (phraseIndex === this._prevPhraseIndex || !this._phraseElements) return;
+    if (phraseIndex < 0 || phraseIndex >= this._phraseElements.length) return;
+
+    const prev = this._prevPhraseIndex ?? 0;
+    const nearRange = 2;
+
+    const minChanged = Math.min(prev, phraseIndex);
+    const maxChanged = Math.max(prev, phraseIndex) + nearRange + 1;
+
+    for (let i = Math.max(0, minChanged - nearRange); i < Math.min(this._phraseElements.length, maxChanged + nearRange + 1); i++) {
+      let cls = 'phrase';
+      if (i < phraseIndex) {
+        cls = 'phrase spoken-phrase';
+      } else if (i === phraseIndex) {
+        cls = 'phrase current-phrase';
+      } else if (i <= phraseIndex + nearRange) {
+        cls = 'phrase near-phrase';
       }
-    });
+      this._phraseElements[i].className = cls;
+    }
+
+    this._prevPhraseIndex = phraseIndex;
+  }
+
+  highlightWord(wordIndex) {
+    const phraseIndex = this.phraseIndexForWord(wordIndex);
+    this.highlightPhrase(phraseIndex);
   }
   
   matchAndScroll(transcript) {
-    const spokenWords = transcript.toLowerCase().split(/\s+/).map(w => this.normalizeWord(w)).filter(w => w.length > 1);
-    
+    const spokenWords = transcript.toLowerCase().split(/\s+/)
+      .map(w => this.normalizeWord(w))
+      .filter(w => w.length > 0);
+
     if (spokenWords.length === 0) return;
-    
-    // Search ahead from current position
-    const searchStart = this.currentWordIndex;
-    const searchEnd = Math.min(this.words.length, this.currentWordIndex + 30);
-    
-    // Get last spoken word for quick matching
-    const lastWord = spokenWords[spokenWords.length - 1];
-    
-    // Quick exact match first (fastest)
-    for (let i = searchStart; i < searchEnd; i++) {
-      if (this.words[i].normalized === lastWord) {
-        console.log(`Exact match: "${lastWord}" at index ${i}`);
-        this.scrollToWord(i);
-        return;
+
+    // Adaptive search window — allow small backward correction, wide forward range
+    const searchStart = Math.max(0, this.currentWordIndex - 5);
+    const searchEnd = Math.min(this.words.length, this.currentWordIndex + 80);
+
+    // Fast path: 1-2 words — direct match for lowest latency
+    if (spokenWords.length <= 2) {
+      const lastWord = spokenWords[spokenWords.length - 1];
+      for (let i = searchStart; i < searchEnd; i++) {
+        if (this.words[i].normalized === lastWord) {
+          this.scrollToWord(i);
+          return;
+        }
+      }
+      for (let i = searchStart; i < searchEnd; i++) {
+        if (this.fuzzyMatch(lastWord, this.words[i].normalized)) {
+          this.scrollToWord(i);
+          return;
+        }
+      }
+      return;
+    }
+
+    // Full path: 3+ words — sequence matching for accuracy
+    const windowSize = Math.min(spokenWords.length, 6);
+    const matchWords = spokenWords.slice(-windowSize);
+
+    let bestScore = 0;
+    let bestIndex = -1;
+
+    for (let i = searchStart; i <= searchEnd; i++) {
+      let score = 0;
+      let consecutive = 0;
+      let maxConsecutive = 0;
+
+      for (let j = 0; j < matchWords.length; j++) {
+        if (i + j >= this.words.length) break;
+        const scriptWord = this.words[i + j].normalized;
+        const spokenWord = matchWords[j];
+
+        if (scriptWord === spokenWord) {
+          score += 2;
+          consecutive++;
+        } else if (this.fuzzyMatch(spokenWord, scriptWord)) {
+          score += 1;
+          consecutive++;
+        } else {
+          consecutive = 0;
+        }
+        maxConsecutive = Math.max(maxConsecutive, consecutive);
+      }
+
+      const totalScore = score + maxConsecutive * 0.5 + (i >= this.currentWordIndex ? 0.1 : 0);
+
+      if (totalScore > bestScore) {
+        bestScore = totalScore;
+        bestIndex = Math.min(i + matchWords.length - 1, this.words.length - 1);
       }
     }
-    
-    // Fuzzy match if no exact match
-    for (let i = searchStart; i < searchEnd; i++) {
-      if (this.fuzzyMatch(lastWord, this.words[i].normalized)) {
-        console.log(`Fuzzy match: "${lastWord}" ~ "${this.words[i].normalized}" at index ${i}`);
-        this.scrollToWord(i);
-        return;
-      }
+
+    if (bestIndex >= 0 && bestScore >= 3) {
+      this.scrollToWord(bestIndex);
     }
-    
-    console.log(`No match for: "${lastWord}" (searching ${searchStart}-${searchEnd})`);
   }
   
   fuzzyMatch(spoken, script) {
@@ -567,29 +638,28 @@ class SmartTeleprompter {
   }
   
   scrollToWord(index) {
-    if (index < this.currentWordIndex) return;
-    if (index === this.currentWordIndex) {
-      // Just update highlighting
-      this.highlightWord(index);
-      return;
-    }
+    if (index < this.currentWordIndex - 10) return;
+    if (index === this.currentWordIndex) return;
+
+    this.lastSTTIndex = index;
     this.currentWordIndex = index;
-    
-    // Highlight current word
-    this.highlightWord(index);
-    
-    const currentEl = document.querySelector(`.word[data-index="${this.currentWordIndex}"]`);
-    if (currentEl) {
-      const container = document.getElementById('script-container');
-      const containerRect = container.getBoundingClientRect();
-      const targetY = containerRect.height * 0.3;
-      const wordRect = currentEl.getBoundingClientRect();
-      const wordOffset = wordRect.top - containerRect.top;
-      
-      this.currentScrollY = this.currentScrollY - (wordOffset - targetY);
-      
-      // Instant scroll (no lag)
-      this.applyScroll();
+
+    const newPhraseIndex = this.phraseIndexForWord(index);
+    this.currentPhraseIndex = newPhraseIndex;
+    this.highlightPhrase(newPhraseIndex);
+
+    if (!this.autoScrollMode) {
+      const el = this._phraseElements?.[newPhraseIndex];
+      if (el) {
+        const container = document.getElementById('script-container');
+        const containerRect = container.getBoundingClientRect();
+        const targetY = containerRect.height * 0.3;
+        const phraseRect = el.getBoundingClientRect();
+        const phraseOffset = phraseRect.top - containerRect.top;
+
+        this.currentScrollY -= (phraseOffset - targetY);
+        this.applyScroll();
+      }
     }
   }
   
@@ -606,6 +676,7 @@ class SmartTeleprompter {
       btn.textContent = '▶️ Resume';
       btn.classList.add('paused');
       this.stopAutoScroll();
+      this.stopPredictiveAdvance();
       document.getElementById('mic-status').textContent = '⏸️ Paused';
     } else {
       btn.textContent = '⏸️ Pause';
@@ -617,6 +688,12 @@ class SmartTeleprompter {
   reset() {
     this.currentWordIndex = 0;
     this.currentScrollY = 0;
+    this.lastSTTIndex = 0;
+    this.currentPhraseIndex = 0;
+    this._wordElements = null;
+    this._phraseElements = null;
+    this._prevPhraseIndex = -1;
+    this.stopPredictiveAdvance();
     this.renderScript();
     this.applyScroll();
     this.stopAutoScroll();
@@ -626,6 +703,7 @@ class SmartTeleprompter {
     this.isListening = false;
     this.isPaused = false;
     this.stopAutoScroll();
+    this.stopPredictiveAdvance();
     
     if (this.silenceTimeout) {
       clearTimeout(this.silenceTimeout);
