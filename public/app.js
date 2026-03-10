@@ -100,6 +100,7 @@ class SmartTeleprompter {
         if (this.isPaused) return;
         
         const data = JSON.parse(event.data);
+        console.log('Deepgram message:', data.type || 'transcript', data);
         
         // Handle speech detection
         if (data.type === 'SpeechStarted') {
@@ -110,6 +111,7 @@ class SmartTeleprompter {
         if (data.channel?.alternatives?.[0]?.transcript) {
           const transcript = data.channel.alternatives[0].transcript;
           if (transcript.trim()) {
+            console.log('Heard:', transcript);
             document.getElementById('transcript').textContent = transcript;
             this.onSpeechDetected();
             
@@ -125,10 +127,12 @@ class SmartTeleprompter {
         this.fallbackToWebSpeech();
       };
       
-      this.deepgramSocket.onclose = () => {
-        console.log('Deepgram disconnected');
-        if (this.isListening && !this.isPaused) {
-          setTimeout(() => this.setupDeepgram(), 1000);
+      this.deepgramSocket.onclose = (event) => {
+        console.log('Deepgram disconnected', event.code, event.reason);
+        // Don't auto-reconnect if we closed intentionally or auth failed
+        if (this.isListening && !this.isPaused && event.code !== 1000) {
+          console.log('Reconnecting in 2 seconds...');
+          setTimeout(() => this.setupDeepgram(), 2000);
         }
       };
       
@@ -139,25 +143,36 @@ class SmartTeleprompter {
   }
   
   startRecording() {
-    const audioContext = new AudioContext({ sampleRate: 16000 });
-    const source = audioContext.createMediaStreamSource(this.audioStream);
-    const processor = audioContext.createScriptProcessor(4096, 1, 1);
-    
-    processor.onaudioprocess = (e) => {
-      if (this.deepgramSocket?.readyState === WebSocket.OPEN && !this.isPaused) {
-        const inputData = e.inputBuffer.getChannelData(0);
-        const pcmData = new Int16Array(inputData.length);
-        for (let i = 0; i < inputData.length; i++) {
-          pcmData[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+    try {
+      const audioContext = new AudioContext({ sampleRate: 16000 });
+      const source = audioContext.createMediaStreamSource(this.audioStream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      
+      let audioSent = 0;
+      
+      processor.onaudioprocess = (e) => {
+        if (this.deepgramSocket?.readyState === WebSocket.OPEN && !this.isPaused) {
+          const inputData = e.inputBuffer.getChannelData(0);
+          const pcmData = new Int16Array(inputData.length);
+          for (let i = 0; i < inputData.length; i++) {
+            pcmData[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+          }
+          this.deepgramSocket.send(pcmData.buffer);
+          audioSent++;
+          if (audioSent % 50 === 0) {
+            console.log(`Audio chunks sent: ${audioSent}`);
+          }
         }
-        this.deepgramSocket.send(pcmData.buffer);
-      }
-    };
-    
-    source.connect(processor);
-    processor.connect(audioContext.destination);
-    this.audioContext = audioContext;
-    this.processor = processor;
+      };
+      
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+      this.audioContext = audioContext;
+      this.processor = processor;
+      console.log('Audio recording started');
+    } catch (error) {
+      console.error('Error starting recording:', error);
+    }
   }
   
   onSpeechStart() {
