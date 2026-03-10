@@ -28,7 +28,7 @@ class SmartTeleprompter {
     document.getElementById('start-btn').addEventListener('click', () => this.start());
     document.getElementById('font-size').addEventListener('input', (e) => this.updateFontSize(e.target.value));
     document.getElementById('scroll-speed').addEventListener('input', (e) => this.scrollSpeed = parseInt(e.target.value));
-    document.getElementById('mirror-mode').addEventListener('change', (e) => this.toggleMirror(e.target.checked));
+    document.getElementById('mirror-mode').addEventListener('change', (e) => this.setMirrorMode(e.target.value));
     document.getElementById('dark-mode').addEventListener('change', (e) => this.toggleDarkMode(e.target.checked));
     
     // Teleprompter controls
@@ -292,12 +292,15 @@ class SmartTeleprompter {
     }
   }
   
-  toggleMirror(enabled) {
+  setMirrorMode(mode) {
     const scriptText = document.getElementById('script-text');
-    if (enabled) {
-      scriptText.classList.add('mirrored');
-    } else {
-      scriptText.classList.remove('mirrored');
+    scriptText.classList.remove('mirrored-horizontal', 'mirrored-vertical', 'mirrored-both');
+    if (mode === 'horizontal') {
+      scriptText.classList.add('mirrored-horizontal');
+    } else if (mode === 'vertical') {
+      scriptText.classList.add('mirrored-vertical');
+    } else if (mode === 'both') {
+      scriptText.classList.add('mirrored-both');
     }
   }
   

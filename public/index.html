@@ -30,10 +30,13 @@
           </div>
           
           <div class="setting">
-            <label>
-              <input type="checkbox" id="mirror-mode">
-              Mirror Mode (for teleprompter glass)
-            </label>
+            <label for="mirror-mode">Mirror Mode</label>
+            <select id="mirror-mode">
+              <option value="none">None</option>
+              <option value="horizontal">Horizontal (← flip)</option>
+              <option value="vertical">Vertical (↕ flip)</option>
+              <option value="both">Both (180° rotate)</option>
+            </select>
           </div>
           
           <div class="setting">
