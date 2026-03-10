@@ -176,23 +176,25 @@ class SmartTeleprompter {
       
       // Get selected language
       const language = document.getElementById('language')?.value || 'en';
+      const langCode = language === 'multi' ? '' : language;
+      
+      // Build WebSocket URL with query params (browser can't set headers, use xi-api-key in URL)
+      const wsUrl = new URL('wss://api.elevenlabs.io/v1/speech-to-text/realtime');
+      wsUrl.searchParams.set('xi-api-key', apiKey);
+      wsUrl.searchParams.set('model_id', 'scribe_v2_realtime');
+      wsUrl.searchParams.set('audio_format', 'pcm_16000');
+      wsUrl.searchParams.set('commit_strategy', 'vad');
+      wsUrl.searchParams.set('vad_silence_threshold_secs', '0.5');
+      wsUrl.searchParams.set('min_silence_duration_ms', '50');
+      if (langCode) wsUrl.searchParams.set('language_code', langCode);
+      
+      console.log('Connecting to ElevenLabs:', wsUrl.toString().replace(apiKey, '***'));
       
       // Connect to ElevenLabs Scribe WebSocket
-      this.sttSocket = new WebSocket('wss://api.elevenlabs.io/v1/speech-to-text/stream');
+      this.sttSocket = new WebSocket(wsUrl.toString());
       
       this.sttSocket.onopen = () => {
-        console.log('ElevenLabs WebSocket opened, sending config...');
-        // Send initial config
-        this.sttSocket.send(JSON.stringify({
-          type: 'config',
-          data: {
-            model: 'scribe_v2',
-            language: language === 'multi' ? 'auto' : language,
-            sample_rate: 16000,
-            encoding: 'pcm_s16le'
-          },
-          authorization: `Bearer ${apiKey}`
-        }));
+        console.log('ElevenLabs WebSocket opened');
         document.getElementById('mic-status').textContent = '🎤 ElevenLabs Scribe Connected';
         this.startRecordingElevenLabs();
       };
@@ -203,26 +205,39 @@ class SmartTeleprompter {
         const data = JSON.parse(event.data);
         console.log('ElevenLabs message:', data);
         
-        // Handle transcription based on ElevenLabs response format
-        if (data.text || data.transcript) {
-          const transcript = data.text || data.transcript;
-          if (transcript.trim()) {
-            console.log('Heard:', transcript);
-            document.getElementById('transcript').textContent = transcript;
-            this.onSpeechDetected();
-            this.matchAndScroll(transcript);
-          }
+        // Handle session started
+        if (data.message_type === 'session_started') {
+          console.log('ElevenLabs session started:', data.session_id);
+          return;
         }
         
-        // Handle partial/interim results
-        if (data.type === 'transcript' && data.data?.text) {
-          const transcript = data.data.text;
-          if (transcript.trim()) {
-            console.log('Heard:', transcript);
-            document.getElementById('transcript').textContent = transcript;
-            this.onSpeechDetected();
-            this.matchAndScroll(transcript);
-          }
+        // Handle partial transcript (interim results)
+        if (data.message_type === 'partial_transcript' && data.text) {
+          console.log('Partial:', data.text);
+          document.getElementById('transcript').textContent = data.text;
+          this.onSpeechDetected();
+          this.matchAndScroll(data.text);
+        }
+        
+        // Handle committed transcript (final results)
+        if (data.message_type === 'committed_transcript' && data.text) {
+          console.log('Final:', data.text);
+          document.getElementById('transcript').textContent = data.text;
+          this.onSpeechDetected();
+          this.matchAndScroll(data.text);
+        }
+        
+        // Handle committed transcript with timestamps
+        if (data.message_type === 'committed_transcript_with_timestamps' && data.text) {
+          console.log('Final w/ timestamps:', data.text);
+          document.getElementById('transcript').textContent = data.text;
+          this.onSpeechDetected();
+          this.matchAndScroll(data.text);
+        }
+        
+        // Handle errors
+        if (data.message_type && data.message_type.includes('error')) {
+          console.error('ElevenLabs error:', data);
         }
       };
       
@@ -250,7 +265,8 @@ class SmartTeleprompter {
     try {
       const audioContext = new AudioContext({ sampleRate: 16000 });
       const source = audioContext.createMediaStreamSource(this.audioStream);
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      // Use smaller buffer for lower latency (1024 = 64ms at 16kHz)
+      const processor = audioContext.createScriptProcessor(1024, 1, 1);
       
       let audioSent = 0;
       
@@ -261,13 +277,14 @@ class SmartTeleprompter {
           for (let i = 0; i < inputData.length; i++) {
             pcmData[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
           }
-          // ElevenLabs expects audio data wrapped in a message
+          // ElevenLabs expects audio as base64 in input_audio_chunk message
+          const base64Audio = btoa(String.fromCharCode.apply(null, new Uint8Array(pcmData.buffer)));
           this.sttSocket.send(JSON.stringify({
-            type: 'audio',
-            data: btoa(String.fromCharCode.apply(null, new Uint8Array(pcmData.buffer)))
+            message_type: 'input_audio_chunk',
+            audio_base_64: base64Audio
           }));
           audioSent++;
-          if (audioSent % 50 === 0) {
+          if (audioSent % 100 === 0) {
             console.log(`Audio chunks sent: ${audioSent}`);
           }
         }
@@ -277,7 +294,7 @@ class SmartTeleprompter {
       processor.connect(audioContext.destination);
       this.audioContext = audioContext;
       this.processor = processor;
-      console.log('ElevenLabs audio recording started');
+      console.log('ElevenLabs audio recording started (1024 buffer)');
     } catch (error) {
       console.error('Error starting ElevenLabs recording:', error);
     }
@@ -287,7 +304,8 @@ class SmartTeleprompter {
     try {
       const audioContext = new AudioContext({ sampleRate: 16000 });
       const source = audioContext.createMediaStreamSource(this.audioStream);
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      // Use smaller buffer for lower latency (1024 = 64ms at 16kHz)
+      const processor = audioContext.createScriptProcessor(1024, 1, 1);
       
       let audioSent = 0;
       
@@ -300,7 +318,7 @@ class SmartTeleprompter {
           }
           this.sttSocket.send(pcmData.buffer);
           audioSent++;
-          if (audioSent % 50 === 0) {
+          if (audioSent % 100 === 0) {
             console.log(`Audio chunks sent: ${audioSent}`);
           }
         }
@@ -310,7 +328,7 @@ class SmartTeleprompter {
       processor.connect(audioContext.destination);
       this.audioContext = audioContext;
       this.processor = processor;
-      console.log('Deepgram audio recording started');
+      console.log('Deepgram audio recording started (1024 buffer)');
     } catch (error) {
       console.error('Error starting recording:', error);
     }
