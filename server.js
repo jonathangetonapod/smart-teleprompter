@@ -21,6 +21,38 @@ app.get('/api/elevenlabs-key', (req, res) => {
   res.json({ apiKey: ELEVENLABS_API_KEY });
 });
 
+// Get ElevenLabs single-use token for WebSocket auth
+app.get('/api/elevenlabs-token', async (req, res) => {
+  if (!ELEVENLABS_API_KEY) {
+    return res.status(500).json({ error: 'No ElevenLabs API key configured' });
+  }
+  
+  try {
+    const response = await fetch('https://api.elevenlabs.io/v1/speech-to-text/token', {
+      method: 'POST',
+      headers: {
+        'xi-api-key': ELEVENLABS_API_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        max_duration_secs: 3600  // 1 hour token
+      })
+    });
+    
+    const data = await response.json();
+    console.log('ElevenLabs token response:', data);
+    
+    if (data.token) {
+      res.json({ token: data.token });
+    } else {
+      res.status(500).json({ error: 'Failed to get token', details: data });
+    }
+  } catch (error) {
+    console.error('Error getting ElevenLabs token:', error);
+    res.status(500).json({ error: 'Failed to get token: ' + error.message });
+  }
+});
+
 app.get('/api/keys', (req, res) => {
   res.json({ 
     deepgram: DEEPGRAM_API_KEY,

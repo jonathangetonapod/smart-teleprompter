@@ -160,16 +160,20 @@ class SmartTeleprompter {
   
   async setupElevenLabs() {
     try {
-      // Get API key from server
-      const response = await fetch('/api/elevenlabs-key');
-      const { apiKey } = await response.json();
+      // Get single-use token from server (browser WebSocket can't send headers)
+      document.getElementById('mic-status').textContent = '🎤 Getting ElevenLabs token...';
+      const response = await fetch('/api/elevenlabs-token');
+      const data = await response.json();
       
-      if (!apiKey) {
-        console.error('No ElevenLabs API key configured');
-        document.getElementById('mic-status').textContent = '⚠️ No ElevenLabs API Key';
+      if (data.error || !data.token) {
+        console.error('Failed to get ElevenLabs token:', data.error);
+        document.getElementById('mic-status').textContent = '⚠️ ElevenLabs Token Error';
         this.fallbackToWebSpeech();
         return;
       }
+      
+      const token = data.token;
+      console.log('Got ElevenLabs token');
       
       // Get microphone access
       this.audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -178,9 +182,9 @@ class SmartTeleprompter {
       const language = document.getElementById('language')?.value || 'en';
       const langCode = language === 'multi' ? '' : language;
       
-      // Build WebSocket URL with query params (browser can't set headers, use xi-api-key in URL)
+      // Build WebSocket URL with token (single-use token for client-side auth)
       const wsUrl = new URL('wss://api.elevenlabs.io/v1/speech-to-text/realtime');
-      wsUrl.searchParams.set('xi-api-key', apiKey);
+      wsUrl.searchParams.set('token', token);
       wsUrl.searchParams.set('model_id', 'scribe_v2_realtime');
       wsUrl.searchParams.set('audio_format', 'pcm_16000');
       wsUrl.searchParams.set('commit_strategy', 'vad');
@@ -188,7 +192,7 @@ class SmartTeleprompter {
       wsUrl.searchParams.set('min_silence_duration_ms', '50');
       if (langCode) wsUrl.searchParams.set('language_code', langCode);
       
-      console.log('Connecting to ElevenLabs:', wsUrl.toString().replace(apiKey, '***'));
+      console.log('Connecting to ElevenLabs with token...');
       
       // Connect to ElevenLabs Scribe WebSocket
       this.sttSocket = new WebSocket(wsUrl.toString());
