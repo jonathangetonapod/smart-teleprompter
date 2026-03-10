@@ -33,7 +33,9 @@ class SmartTeleprompter {
     });
     document.getElementById('mirror-mode').addEventListener('change', (e) => this.setMirrorMode(e.target.value));
     document.getElementById('dark-mode').addEventListener('change', (e) => this.toggleDarkMode(e.target.checked));
-    document.getElementById('auto-scroll-mode').addEventListener('change', (e) => this.autoScrollMode = e.target.checked);
+    document.getElementById('scroll-mode').addEventListener('change', (e) => {
+      this.autoScrollMode = e.target.value === 'auto-scroll';
+    });
     
     // Teleprompter controls
     document.getElementById('pause-btn').addEventListener('click', () => this.togglePause());
@@ -286,7 +288,7 @@ class SmartTeleprompter {
     const mirrorMode = document.getElementById('mirror-mode').value;
     document.getElementById('mirror-mode-live').value = mirrorMode;
     this.setMirrorMode(mirrorMode);
-    this.autoScrollMode = document.getElementById('auto-scroll-mode').checked;
+    this.autoScrollMode = document.getElementById('scroll-mode').value === 'auto-scroll';
     
     this.isListening = true;
     document.getElementById('mic-status').textContent = '🎤 Connecting...';
@@ -310,9 +312,20 @@ class SmartTeleprompter {
   renderScript() {
     const container = document.getElementById('script-text');
     container.innerHTML = this.words.map((word, i) => 
-      `<span class="word" data-index="${i}">${word.original} </span>`
+      `<span class="word ${i === 0 ? 'current' : ''}" data-index="${i}">${word.original} </span>`
     ).join('');
     container.style.fontSize = `${this.fontSize}px`;
+  }
+  
+  highlightWord(index) {
+    document.querySelectorAll('.word').forEach((el, i) => {
+      el.classList.remove('spoken', 'current');
+      if (i < index) {
+        el.classList.add('spoken');
+      } else if (i === index) {
+        el.classList.add('current');
+      }
+    });
   }
   
   matchAndScroll(transcript) {
@@ -376,6 +389,9 @@ class SmartTeleprompter {
     if (index <= this.currentWordIndex) return;
     this.currentWordIndex = index;
     
+    // Highlight current word
+    this.highlightWord(index);
+    
     const currentEl = document.querySelector(`.word[data-index="${this.currentWordIndex}"]`);
     if (currentEl) {
       const container = document.getElementById('script-container');
@@ -385,7 +401,17 @@ class SmartTeleprompter {
       const wordOffset = wordRect.top - containerRect.top;
       
       this.currentScrollY = this.currentScrollY - (wordOffset - targetY);
-      this.applyScroll();
+      
+      // Smooth scroll
+      const scriptText = document.getElementById('script-text');
+      const mirrorMode = document.getElementById('mirror-mode-live')?.value || 'none';
+      let mirrorTransform = '';
+      if (mirrorMode === 'horizontal') mirrorTransform = 'scaleX(-1)';
+      else if (mirrorMode === 'vertical') mirrorTransform = 'scaleY(-1)';
+      else if (mirrorMode === 'both') mirrorTransform = 'scale(-1, -1)';
+      
+      scriptText.style.transition = 'transform 200ms ease-out';
+      scriptText.style.transform = `translateY(${this.currentScrollY}px) ${mirrorTransform}`.trim();
     }
   }
   
