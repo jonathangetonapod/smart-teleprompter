@@ -85,9 +85,12 @@ class SmartTeleprompter {
       // Get microphone access
       this.audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
+      // Get selected language
+      const language = document.getElementById('language')?.value || 'en';
+      
       // Connect to Deepgram WebSocket
       this.deepgramSocket = new WebSocket(
-        `wss://api.deepgram.com/v1/listen?model=nova-2&punctuate=true&interim_results=true&vad_events=true&encoding=linear16&sample_rate=16000`,
+        `wss://api.deepgram.com/v1/listen?model=nova-2&language=${language}&punctuate=true&interim_results=true&vad_events=true&encoding=linear16&sample_rate=16000`,
         ['token', apiKey]
       );
       
