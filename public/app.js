@@ -35,6 +35,7 @@ class SmartTeleprompter {
     document.getElementById('pause-btn').addEventListener('click', () => this.togglePause());
     document.getElementById('reset-btn').addEventListener('click', () => this.reset());
     document.getElementById('exit-btn').addEventListener('click', () => this.exit());
+    document.getElementById('mirror-mode-live').addEventListener('change', (e) => this.setMirrorMode(e.target.value));
     
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
@@ -108,6 +109,11 @@ class SmartTeleprompter {
     
     document.getElementById('setup-panel').classList.add('hidden');
     document.getElementById('teleprompter').classList.remove('hidden');
+    
+    // Sync mirror mode from setup to live controls
+    const mirrorMode = document.getElementById('mirror-mode').value;
+    document.getElementById('mirror-mode-live').value = mirrorMode;
+    this.setMirrorMode(mirrorMode);
     
     this.isListening = true;
     this.recognition.start();

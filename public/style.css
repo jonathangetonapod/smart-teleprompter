@@ -244,6 +244,16 @@ body.light-mode select {
   background: #444;
 }
 
+#teleprompter-controls select {
+  background: #333;
+  color: white;
+  border: none;
+  padding: 10px 15px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
 #pause-btn.paused {
   background: #4ade80;
   color: #000;
