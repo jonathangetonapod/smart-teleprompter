@@ -1,38 +1,46 @@
 # 🎬 Smart Teleprompter
 
-A voice-controlled teleprompter that listens to your microphone and automatically scrolls to follow along as you speak.
+AI-powered teleprompter that follows along as you speak and converts your notes into camera-ready scripts.
 
 ## Features
 
-- **Voice-controlled scrolling** - Uses Web Speech API to recognize your voice and automatically scroll
-- **Fuzzy matching** - Handles mispronunciations and variations
-- **Mirror mode** - Flip the text for teleprompter glass reflection
-- **Adjustable font size** - From 24px to 120px
-- **Dark/Light mode** - Easy on the eyes
-- **Keyboard shortcuts**:
-  - `Space` - Pause/Resume
-  - `↑/↓` - Manual scroll adjustment
-  - `Escape` - Exit to setup
+### 🤖 AI Script Converter
+- Paste rough notes, bullet points, or outlines
+- AI converts them into natural, easy-to-read teleprompter scripts
+- Powered by Claude (Anthropic)
 
-## Usage
+### 🎯 Voice-Controlled Scrolling
+- Uses Deepgram for fast, accurate speech recognition (~200ms latency)
+- **Word Follow Mode**: Highlights and follows your exact words
+- **Auto-Scroll Mode**: Scrolls continuously while you speak
 
-1. Paste your script
-2. Adjust font size and settings
-3. Click "Start Teleprompter"
-4. Allow microphone access
-5. Start speaking - the teleprompter follows along!
+### 🪞 Mirror Mode
+- Horizontal, vertical, or both
+- Perfect for teleprompter glass/beam splitter setups
+
+### ⚙️ Customizable
+- Adjustable font size (24-120px)
+- Scroll speed control
+- Dark/Light mode
+- Manual scroll with buttons, keyboard, or mouse wheel
 
 ## Tech Stack
 
-- Node.js + Express (server)
-- Web Speech API (speech recognition)
-- Vanilla JS (no frameworks)
+- **Frontend**: Vanilla JS, HTML, CSS
+- **Backend**: Node.js + Express
+- **Speech Recognition**: Deepgram Nova-2
+- **AI**: Claude 3.5 Sonnet (Anthropic)
 
-## Deployment
+## Setup
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template)
+### Environment Variables
 
-## Local Development
+```
+DEEPGRAM_API_KEY=your_deepgram_key
+ANTHROPIC_API_KEY=your_anthropic_key
+```
+
+### Local Development
 
 ```bash
 npm install
@@ -41,6 +49,22 @@ npm start
 
 Open http://localhost:3000
 
+## Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| Space | Pause/Resume |
+| ↑/↓ | Manual scroll |
+| Escape | Exit to setup |
+
+## Deployment
+
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app)
+
 ## Browser Support
 
-Requires Chrome, Edge, or Safari (browsers with Web Speech API support).
+Requires Chrome, Edge, or Safari (browsers with microphone access).
+
+---
+
+Built with 🦾 by Iron Man
