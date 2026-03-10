@@ -1,26 +1,21 @@
-// Smart Teleprompter - Voice-controlled scrolling
+// Smart Teleprompter - Voice-controlled scrolling with Deepgram
 class SmartTeleprompter {
   constructor() {
     this.words = [];
     this.currentWordIndex = 0;
-    this.recognition = null;
     this.isListening = false;
     this.isPaused = false;
     this.fontSize = 48;
     this.scrollSpeed = 300;
+    this.deepgramSocket = null;
+    this.mediaRecorder = null;
+    this.audioStream = null;
     
     this.init();
   }
   
   init() {
-    // Check for speech recognition support
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-      alert('Speech recognition not supported. Please use Chrome or Edge.');
-      return;
-    }
-    
     this.setupEventListeners();
-    this.setupSpeechRecognition();
   }
   
   setupEventListeners() {
@@ -61,7 +56,88 @@ class SmartTeleprompter {
     });
   }
   
-  setupSpeechRecognition() {
+  async setupDeepgram() {
+    try {
+      // Get API key from server
+      const response = await fetch('/api/deepgram-key');
+      const { apiKey } = await response.json();
+      
+      // Get microphone access
+      this.audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      // Connect to Deepgram WebSocket
+      this.deepgramSocket = new WebSocket(
+        `wss://api.deepgram.com/v1/listen?model=nova-2&punctuate=true&interim_results=true&encoding=linear16&sample_rate=16000`,
+        ['token', apiKey]
+      );
+      
+      this.deepgramSocket.onopen = () => {
+        console.log('Deepgram connected');
+        this.startRecording();
+        this.updateMicStatus();
+      };
+      
+      this.deepgramSocket.onmessage = (event) => {
+        if (this.isPaused) return;
+        
+        const data = JSON.parse(event.data);
+        if (data.channel?.alternatives?.[0]?.transcript) {
+          const transcript = data.channel.alternatives[0].transcript;
+          if (transcript.trim()) {
+            document.getElementById('transcript').textContent = transcript;
+            this.matchAndScroll(transcript);
+          }
+        }
+      };
+      
+      this.deepgramSocket.onerror = (error) => {
+        console.error('Deepgram error:', error);
+        this.fallbackToWebSpeech();
+      };
+      
+      this.deepgramSocket.onclose = () => {
+        console.log('Deepgram disconnected');
+        if (this.isListening && !this.isPaused) {
+          // Reconnect if still supposed to be listening
+          setTimeout(() => this.setupDeepgram(), 1000);
+        }
+      };
+      
+    } catch (error) {
+      console.error('Failed to setup Deepgram:', error);
+      this.fallbackToWebSpeech();
+    }
+  }
+  
+  startRecording() {
+    const audioContext = new AudioContext({ sampleRate: 16000 });
+    const source = audioContext.createMediaStreamSource(this.audioStream);
+    const processor = audioContext.createScriptProcessor(4096, 1, 1);
+    
+    processor.onaudioprocess = (e) => {
+      if (this.deepgramSocket?.readyState === WebSocket.OPEN && !this.isPaused) {
+        const inputData = e.inputBuffer.getChannelData(0);
+        const pcmData = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) {
+          pcmData[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+        }
+        this.deepgramSocket.send(pcmData.buffer);
+      }
+    };
+    
+    source.connect(processor);
+    processor.connect(audioContext.destination);
+    this.audioContext = audioContext;
+    this.processor = processor;
+  }
+  
+  fallbackToWebSpeech() {
+    console.log('Falling back to Web Speech API');
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      alert('Speech recognition not supported. Please use Chrome or Edge.');
+      return;
+    }
+    
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     this.recognition = new SpeechRecognition();
     this.recognition.continuous = true;
@@ -88,16 +164,16 @@ class SmartTeleprompter {
     
     this.recognition.onerror = (event) => {
       console.error('Speech recognition error:', event.error);
-      if (event.error === 'no-speech') {
-        // Restart on no speech
-        if (this.isListening && !this.isPaused) {
-          this.recognition.start();
-        }
+      if (event.error === 'no-speech' && this.isListening && !this.isPaused) {
+        this.recognition.start();
       }
     };
+    
+    this.recognition.start();
+    this.updateMicStatus();
   }
   
-  start() {
+  async start() {
     const scriptText = document.getElementById('script-input').value.trim();
     if (!scriptText) {
       alert('Please enter a script first!');
@@ -116,12 +192,12 @@ class SmartTeleprompter {
     this.setMirrorMode(mirrorMode);
     
     this.isListening = true;
-    this.recognition.start();
-    this.updateMicStatus();
+    
+    // Try Deepgram first, fallback to Web Speech
+    await this.setupDeepgram();
   }
   
   parseScript(text) {
-    // Split into words, keeping punctuation attached
     this.words = text.split(/\s+/).map((word, index) => ({
       original: word,
       normalized: this.normalizeWord(word),
@@ -180,7 +256,7 @@ class SmartTeleprompter {
     if (spoken === script) return true;
     if (spoken.length < 2 || script.length < 2) return spoken === script;
     
-    // Check if one contains the other (for partial words)
+    // Check if one contains the other
     if (script.includes(spoken) || spoken.includes(script)) return true;
     
     // Levenshtein distance for fuzzy matching
@@ -235,7 +311,7 @@ class SmartTeleprompter {
     if (currentEl) {
       const container = document.getElementById('script-container');
       const containerRect = container.getBoundingClientRect();
-      const targetY = containerRect.height * 0.3; // 30% from top
+      const targetY = containerRect.height * 0.3;
       
       const wordRect = currentEl.getBoundingClientRect();
       const scrollText = document.getElementById('script-text');
@@ -260,11 +336,9 @@ class SmartTeleprompter {
     const btn = document.getElementById('pause-btn');
     
     if (this.isPaused) {
-      this.recognition.stop();
       btn.textContent = '▶️ Resume';
       btn.classList.add('paused');
     } else {
-      this.recognition.start();
       btn.textContent = '⏸️ Pause';
       btn.classList.remove('paused');
     }
@@ -281,7 +355,26 @@ class SmartTeleprompter {
   exit() {
     this.isListening = false;
     this.isPaused = false;
-    this.recognition.stop();
+    
+    // Cleanup Deepgram
+    if (this.deepgramSocket) {
+      this.deepgramSocket.close();
+      this.deepgramSocket = null;
+    }
+    if (this.audioStream) {
+      this.audioStream.getTracks().forEach(track => track.stop());
+      this.audioStream = null;
+    }
+    if (this.audioContext) {
+      this.audioContext.close();
+      this.audioContext = null;
+    }
+    
+    // Cleanup Web Speech fallback
+    if (this.recognition) {
+      this.recognition.stop();
+      this.recognition = null;
+    }
     
     document.getElementById('teleprompter').classList.add('hidden');
     document.getElementById('setup-panel').classList.remove('hidden');
@@ -324,7 +417,7 @@ class SmartTeleprompter {
       status.textContent = '⏸️ Paused';
       status.className = 'paused';
     } else {
-      status.textContent = '🎤 Listening...';
+      status.textContent = '🎤 Listening (Deepgram)';
       status.className = 'listening';
     }
   }
