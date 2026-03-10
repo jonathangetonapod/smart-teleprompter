@@ -346,6 +346,13 @@ class SmartTeleprompter {
     
     if (spokenWords.length === 0) return;
     
+    // Debug: show what we're searching in
+    if (this.words.length > 0 && !this.debugShown) {
+      console.log('Script words:', this.words.slice(0, 20).map(w => w.normalized).join(', '));
+      this.debugShown = true;
+    }
+    console.log('Spoken words:', spokenWords.join(', '));
+    
     // Search a wider window
     const searchStart = Math.max(0, this.currentWordIndex - 5);
     const searchEnd = Math.min(this.words.length, this.currentWordIndex + 50);
@@ -394,7 +401,7 @@ class SmartTeleprompter {
       }
     }
     
-    console.log(`Matching: "${recentSpoken.join(' ')}" -> index ${bestMatch} (score: ${bestScore})`);
+    console.log(`Matching: "${spokenWords.join(' ')}" -> index ${bestMatch} (score: ${bestScore}, current: ${this.currentWordIndex})`);
     
     if (bestMatch >= this.currentWordIndex && bestScore >= 2) {
       this.scrollToWord(bestMatch);
