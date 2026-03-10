@@ -203,6 +203,28 @@ class SmartTeleprompter {
     if (this.autoScrollMode && !this.isScrolling && !this.isPaused) {
       this.startAutoScroll();
     }
+    // Advance one phrase immediately — SpeechStarted fires ~50ms, way before transcript
+    this.advanceOnePhrase();
+  }
+
+  advanceOnePhrase() {
+    const next = this.currentPhraseIndex + 1;
+    if (next >= this.phrases.length) return;
+    this.currentPhraseIndex = next;
+    this.currentWordIndex = this.phrases[next].endWordIndex;
+    this.highlightPhrase(next);
+
+    if (!this.autoScrollMode) {
+      const el = this._phraseElements?.[next];
+      if (el) {
+        const container = document.getElementById('script-container');
+        const containerRect = container.getBoundingClientRect();
+        const targetY = containerRect.height * 0.3;
+        const rect = el.getBoundingClientRect();
+        this.currentScrollY -= (rect.top - containerRect.top - targetY);
+        this.applyScroll(true);
+      }
+    }
   }
 
   onSpeechDetected() {
@@ -480,10 +502,22 @@ class SmartTeleprompter {
     const searchStart = this.currentWordIndex;
     const searchEnd = Math.min(this.words.length, this.currentWordIndex + 50);
 
-    // Need at least 2 spoken words for reliable matching (single words too ambiguous)
-    if (spokenWords.length < 2) return;
+    // Fast path: single distinctive word (4+ chars, exact match only)
+    // Skips common short words like "the", "and", "to" that cause false matches
+    if (spokenWords.length === 1) {
+      const word = spokenWords[0];
+      if (word.length >= 4) {
+        for (let i = searchStart; i < searchEnd; i++) {
+          if (this.words[i].normalized === word) {
+            this.scrollToWord(i);
+            return;
+          }
+        }
+      }
+      return;
+    }
 
-    // Use last N spoken words for sequence matching
+    // Full path: 2+ words — sequence matching
     const windowSize = Math.min(spokenWords.length, 6);
     const matchWords = spokenWords.slice(-windowSize);
 
@@ -512,7 +546,6 @@ class SmartTeleprompter {
         maxConsecutive = Math.max(maxConsecutive, consecutive);
       }
 
-      // Only consider positions ahead of current
       const totalScore = score + maxConsecutive * 0.5;
 
       if (totalScore > bestScore) {
@@ -521,8 +554,8 @@ class SmartTeleprompter {
       }
     }
 
-    // Require strong confidence: at least 2 exact word matches worth of score
-    if (bestIndex >= 0 && bestScore >= 4) {
+    // At least 2 words matching
+    if (bestIndex >= 0 && bestScore >= 3) {
       this.scrollToWord(bestIndex);
     }
   }
