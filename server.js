@@ -29,6 +29,9 @@ app.post('/api/convert-script', async (req, res) => {
   }
   
   try {
+    console.log('Calling Anthropic API...');
+    console.log('API Key present:', !!ANTHROPIC_API_KEY);
+    
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -60,15 +63,19 @@ ${text}`
     });
     
     const data = await response.json();
+    console.log('Anthropic response status:', response.status);
+    console.log('Anthropic response:', JSON.stringify(data).slice(0, 500));
     
     if (data.content && data.content[0]) {
       res.json({ script: data.content[0].text });
+    } else if (data.error) {
+      res.status(500).json({ error: data.error.message || 'API error', details: data });
     } else {
       res.status(500).json({ error: 'Failed to generate script', details: data });
     }
   } catch (error) {
     console.error('Error calling Claude:', error);
-    res.status(500).json({ error: 'Failed to convert script' });
+    res.status(500).json({ error: 'Failed to convert script: ' + error.message });
   }
 });
 
