@@ -50,18 +50,34 @@ app.post('/api/convert-script', async (req, res) => {
           role: 'user',
           content: `You are a teleprompter script writer. Convert the following notes into a script optimized for reading aloud on camera.
 
-CRITICAL RULES — follow every single one:
-- Write like you TALK, not like you write. Use contractions (I'm, you're, we'll, don't, can't, it's).
+Detect the language of the input. Follow ALL rules below:
+
+GENERAL RULES:
+- Write like you TALK, not like you write.
 - Short sentences. Max 12 words per sentence. One idea per sentence.
-- Use fragments when natural. "Pretty cool, right?" "Here's the thing." "Quick example."
-- Start sentences with "So", "Now", "Look", "Here's the thing" — conversational starters.
-- Add rhetorical questions to break up long stretches: "Sound familiar?" "Make sense?"
+- Use fragments when natural.
 - Break paragraphs often. Every 2-3 sentences, start a new paragraph.
 - Put a blank line between paragraphs (these become breathing pauses).
 - Write the hook (first 2 sentences) and CTA (last 2 sentences) word-for-word and punchy.
 - NO stage directions, NO [pause], NO (emphasis), NO markdown formatting.
 - NO bullet points, NO headers, NO numbered lists.
 - Just clean spoken text, paragraph by paragraph.
+
+IF THE INPUT IS IN SPANISH (or mostly Spanish):
+- Keep the output in Spanish.
+- Replace difficult, formal, or literary words with simple everyday alternatives.
+- Use common spoken Spanish, not written/academic Spanish.
+- Examples: "implementar" → "hacer", "adquirir" → "conseguir", "posteriormente" → "después", "mediante" → "con", "sin embargo" → "pero", "debido a" → "por", "realizar" → "hacer", "establecer" → "poner", "fundamental" → "clave" or "importante", "actualmente" → "hoy en día" or "ahora".
+- Avoid subjunctive when possible — use simpler verb forms.
+- Use "tú" style (informal), not "usted" — unless the content is clearly formal.
+- Add conversational starters: "Mira", "Bueno", "O sea", "La verdad es que", "Fíjate que".
+- Add rhetorical questions: "¿Me explico?", "¿Verdad?", "¿Tiene sentido?".
+
+IF THE INPUT IS IN ENGLISH:
+- Keep the output in English.
+- Use contractions (I'm, you're, we'll, don't, can't, it's).
+- Use conversational starters: "So", "Now", "Look", "Here's the thing".
+- Add rhetorical questions: "Sound familiar?", "Make sense?".
 
 Content to convert:
 ${text}`

@@ -598,28 +598,35 @@ class SmartTeleprompter {
   }
   
   scrollToWord(index) {
-    // Only move forward — you don't re-read on a teleprompter
     if (index <= this.currentWordIndex) return;
 
     this.lastSTTIndex = index;
     this.currentWordIndex = index;
 
-    const newPhraseIndex = this.phraseIndexForWord(index);
-    // Only advance phrase, never go backward
-    if (newPhraseIndex <= this.currentPhraseIndex) return;
-    this.currentPhraseIndex = newPhraseIndex;
-    this.highlightPhrase(newPhraseIndex);
+    // Determine target phrase
+    let targetPhrase;
+    const currentPhrase = this.phrases[this.currentPhraseIndex];
+
+    if (currentPhrase && index >= currentPhrase.endWordIndex) {
+      // Reached end of current phrase — advance to next
+      targetPhrase = this.currentPhraseIndex + 1;
+    } else {
+      // Check if word landed in a later phrase
+      targetPhrase = this.phraseIndexForWord(index);
+    }
+
+    if (targetPhrase <= this.currentPhraseIndex || targetPhrase >= this.phrases.length) return;
+    this.currentPhraseIndex = targetPhrase;
+    this.highlightPhrase(targetPhrase);
 
     if (!this.autoScrollMode) {
-      const el = this._phraseElements?.[newPhraseIndex];
+      const el = this._phraseElements?.[targetPhrase];
       if (el) {
         const container = document.getElementById('script-container');
         const containerRect = container.getBoundingClientRect();
         const targetY = containerRect.height * 0.3;
-        const phraseRect = el.getBoundingClientRect();
-        const phraseOffset = phraseRect.top - containerRect.top;
-
-        this.currentScrollY -= (phraseOffset - targetY);
+        const rect = el.getBoundingClientRect();
+        this.currentScrollY -= (rect.top - containerRect.top - targetY);
         this.applyScroll();
       }
     }
